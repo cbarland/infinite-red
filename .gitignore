@@ -1,0 +1,7 @@
+/target/
+/runtime/godot/.godot/
+/runtime/godot/bin/worldgen
+/runtime/godot/bin/worldgen.exe
+/dist/
+*.tmp
+.DS_Store
