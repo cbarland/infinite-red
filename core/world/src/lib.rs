@@ -312,7 +312,7 @@ pub fn expand(state: &mut WorldState, req: ExpansionRequest) -> Result<String, S
                 id: pid.clone(),
                 setup_area: new_id.clone(),
                 setup: "A damaged road visibly continues north but cannot yet be crossed.".into(),
-                payoff_hint: "Director may resolve through HM, key item, badge, NPC, battle, or story event.".into(),
+                payoff_hint:\n                    "Director may resolve through HM, key item, badge, NPC, battle, or story event."\n                        .into(),
                 resolved: false,
             },
         );
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(a.challenge, 1.17);
         assert_eq!(a.came_from.as_deref(), Some("oaks_lab"));
         assert!(w.promises.contains_key("STORY:ROAD_CLEARED"));
-        assert!(a.exits.iter().any(|e| e.id == "east_frontier" && e.frontier));
+        assert!(a\n            .exits\n            .iter()\n            .any(|e| e.id == "east_frontier" && e.frontier));
         validate(&w).unwrap();
     }
 
