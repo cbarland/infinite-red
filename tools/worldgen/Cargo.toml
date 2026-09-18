@@ -1,0 +1,12 @@
+[package]
+name = "infinite-red-worldgen"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "worldgen"
+path = "src/main.rs"
+
+[dependencies]
+infinite-red-world = { path = "../../core/world" }
+serde_json.workspace = true

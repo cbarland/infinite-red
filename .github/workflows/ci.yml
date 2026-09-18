@@ -1,0 +1,84 @@
+name: vertical-slice
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Test core
+        run: cargo test --workspace
+
+      - name: Build world generator
+        run: cargo build --release -p infinite-red-worldgen
+
+      - name: Smoke test first vertical
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATE="$RUNNER_TEMP/world.json"
+          ./target/release/worldgen bootstrap --seed 42 --output "$STATE"
+          ./target/release/worldgen choose-starter --state "$STATE" --starter charmander
+          ./target/release/worldgen defeat-rival --state "$STATE"
+          ./target/release/worldgen expand --state "$STATE" --area oaks_lab --exit south_door
+          ./target/release/worldgen validate --state "$STATE"
+          python - "$STATE" <<'PY'
+          import json, sys
+          state = json.load(open(sys.argv[1], encoding="utf-8"))
+          area = state["areas"][state["current_area"]]
+          assert area["name"] == "Mountain Village", area["name"]
+          assert area["challenge"] == 1.17, area["challenge"]
+          assert "STORY:ROAD_CLEARED" in state["promises"]
+          assert any(e["id"] == "east_frontier" and e["frontier"] for e in area["exits"])
+          print("vertical smoke ok", state["current_area"], area["challenge"])
+          PY
+
+      - name: Prepare Godot bridge
+        run: |
+          mkdir -p runtime/godot/bin
+          cp target/release/worldgen runtime/godot/bin/worldgen
+          chmod +x runtime/godot/bin/worldgen
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+
+      - name: Parse Godot project
+        run: godot --headless --path runtime/godot --editor --quit
+
+      - name: Export Linux vertical
+        run: |
+          mkdir -p dist
+          godot --headless --path runtime/godot --export-release "Linux/X11" "$GITHUB_WORKSPACE/dist/infinite-red.x86_64"
+          cp target/release/worldgen dist/worldgen
+          chmod +x dist/infinite-red.x86_64 dist/worldgen
+
+      - name: Upload playable vertical
+        uses: actions/upload-artifact@v4
+        with:
+          name: infinite-red-linux-x86_64
+          path: |
+            dist/infinite-red.x86_64
+            dist/infinite-red.pck
+            dist/worldgen
+          if-no-files-found: error
