@@ -22,7 +22,10 @@ fn run() -> Result<(), String> {
             let output = value(&args, "--output")?;
             let state = bootstrap(seed);
             write_state(output, &state)?;
-            println!(\n                "bootstrapped seed={seed} current_area={}",\n                state.current_area\n            );
+            println!(
+                "bootstrapped seed={seed} current_area={}",
+                state.current_area
+            );
         }
         "choose-starter" => {
             let path = value(&args, "--state")?;
@@ -53,7 +56,10 @@ fn run() -> Result<(), String> {
             )?;
             write_state(path, &state)?;
             let area = state.areas.get(&id).ok_or("generated area missing")?;
-            println!(\n                "{}",\n                serde_json::to_string(area).map_err(|e| e.to_string())?\n            );
+            println!(
+                "{}",
+                serde_json::to_string(area).map_err(|e| e.to_string())?
+            );
         }
         "travel" => {
             let path = value(&args, "--state")?;
@@ -106,7 +112,8 @@ fn write_state(path: &str, state: &WorldState) -> Result<(), String> {
     }
     validate(state)?;
     let body = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    fs::write(path, format!("{body}\n")).map_err(|e| format!("write {path}: {e}"))
+    fs::write(path, format!("{body}
+")).map_err(|e| format!("write {path}: {e}"))
 }
 
 fn usage() -> String {
