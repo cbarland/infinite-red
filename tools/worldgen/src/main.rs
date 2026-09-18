@@ -112,7 +112,7 @@ fn write_state(path: &str, state: &WorldState) -> Result<(), String> {
     }
     validate(state)?;
     let body = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    fs::write(path, format!("{body}\\n")).map_err(|e| format!("write {path}: {e}"))
+    fs::write(path, format!("{body}\n")).map_err(|e| format!("write {path}: {e}"))
 }
 
 fn usage() -> String {
