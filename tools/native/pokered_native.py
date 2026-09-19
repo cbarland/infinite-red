@@ -19,6 +19,18 @@ BLOCK_TILES = 4
 BLOCK_PX = TILE_PX * BLOCK_TILES
 TILES_PER_BLOCK = BLOCK_TILES * BLOCK_TILES
 
+# Pinned OVERWORLD semantics from pret/pokered at config/pokered-source.toml.
+# The first generated Route 1 conservatively preserves the exact walkability
+# and grass masks of the original map. Blocks containing warp/ledge special
+# tiles are never substituted.
+OVERWORLD_WALKABLE = {
+    0x00, 0x10, 0x1B, 0x20, 0x21, 0x23, 0x2C, 0x2D, 0x2E, 0x30,
+    0x31, 0x33, 0x39, 0x3C, 0x3E, 0x52, 0x54, 0x58, 0x5B,
+}
+OVERWORLD_GRASS = 0x52
+OVERWORLD_WARP_TILES = {0x1B, 0x58}
+OVERWORLD_LEDGE_TILES = {0x37, 0x36, 0x27, 0x0D, 0x1D}
+
 MAP_CONST_RE = re.compile(
     r"^\s*map_const\s+(?P<id>[A-Z0-9_]+),\s*(?P<width>\d+),\s*(?P<height>\d+)",
     re.MULTILINE,
@@ -291,6 +303,122 @@ def render_map(repo: Path, native_map: NativeMap, output: Path, scale: int = 1) 
     out.save(output)
 
 
+def _block_tiles(blockset: bytes, block_id: int) -> bytes:
+    block_total = len(blockset) // TILES_PER_BLOCK
+    if block_id >= block_total:
+        raise ValueError(f"block id {block_id} outside blockset ({block_total} blocks)")
+    offset = block_id * TILES_PER_BLOCK
+    return blockset[offset : offset + TILES_PER_BLOCK]
+
+
+def _route_safe_signature(blockset: bytes, block_id: int) -> tuple | None:
+    tiles = _block_tiles(blockset, block_id)
+    specials = OVERWORLD_WARP_TILES | OVERWORLD_LEDGE_TILES
+    if any(tile in specials for tile in tiles):
+        return None
+    walkability = tuple(tile in OVERWORLD_WALKABLE for tile in tiles)
+    grass = tuple(tile == OVERWORLD_GRASS for tile in tiles)
+    return walkability, grass
+
+
+def _stable_index(seed: int, x: int, y: int, block_id: int, count: int) -> int:
+    payload = f"{seed}:{x}:{y}:{block_id}".encode("ascii")
+    digest = hashlib.blake2s(payload, digest_size=8).digest()
+    return int.from_bytes(digest, "little") % count
+
+
+def generate_route1_variant(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]:
+    """Generate a conservative native Route 1 variant.
+
+    Boundary blocks and special warp/ledge blocks are preserved. Interior
+    blocks may be substituted only by block IDs already used by Route 1 that
+    have the exact same 4x4 walkability mask and grass-tile positions.
+    """
+    route = load_map(repo, "Route1")
+    if route.tileset != "OVERWORLD":
+        raise ValueError("Route1 is expected to use OVERWORLD")
+
+    blockset = load_blockset(repo, route.tileset)
+    used_ids = sorted(set(route.block_bytes))
+    groups: dict[tuple, list[int]] = {}
+    for block_id in used_ids:
+        signature = _route_safe_signature(blockset, block_id)
+        if signature is not None:
+            groups.setdefault(signature, []).append(block_id)
+
+    result = bytearray(route.block_bytes)
+    changes: list[dict] = []
+    for y in range(1, route.height - 1):
+        for x in range(1, route.width - 1):
+            index = y * route.width + x
+            original = result[index]
+            signature = _route_safe_signature(blockset, original)
+            if signature is None:
+                continue
+            candidates = groups.get(signature, [])
+            if len(candidates) < 2:
+                continue
+            alternatives = [block for block in candidates if block != original]
+            selected = alternatives[
+                _stable_index(seed, x, y, original, len(alternatives))
+            ]
+            result[index] = selected
+            changes.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "from": original,
+                    "to": selected,
+                }
+            )
+
+    generated = bytes(result)
+    if not changes:
+        raise AssertionError("Route 1 generator produced no substitutions")
+
+    # Hard safety gate: every cell must retain the same native collision/grass
+    # signature, and all boundaries remain byte-identical.
+    for y in range(route.height):
+        for x in range(route.width):
+            index = y * route.width + x
+            original = route.block_bytes[index]
+            replacement = generated[index]
+            if x in (0, route.width - 1) or y in (0, route.height - 1):
+                if replacement != original:
+                    raise AssertionError("Route 1 generator modified map boundary")
+            original_sig = _route_safe_signature(blockset, original)
+            replacement_sig = _route_safe_signature(blockset, replacement)
+            if original_sig is None:
+                if replacement != original:
+                    raise AssertionError("Route 1 generator modified special block")
+            elif original_sig != replacement_sig:
+                raise AssertionError("Route 1 generator changed collision/grass topology")
+
+    manifest = {
+        "map": "Route1",
+        "seed": seed,
+        "width": route.width,
+        "height": route.height,
+        "tileset": route.tileset,
+        "changed_blocks": len(changes),
+        "changes": changes,
+        "source_sha256": hashlib.sha256(route.block_bytes).hexdigest(),
+        "generated_sha256": hashlib.sha256(generated).hexdigest(),
+        "safety": "exact_walkability_and_grass_mask_preserved",
+    }
+    return route, generated, manifest
+
+
+def write_route1_variant(repo: Path, seed: int, output_dir: Path) -> tuple[Path, Path]:
+    route, generated, manifest = generate_route1_variant(repo, seed)
+    block_path = output_dir / "maps" / "Route1.blk"
+    manifest_path = output_dir / "Route1.generated.json"
+    block_path.parent.mkdir(parents=True, exist_ok=True)
+    block_path.write_bytes(generated)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return block_path, manifest_path
+
+
 def write_roundtrip(native_map: NativeMap, output_dir: Path) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     block_path = output_dir / f"{native_map.name}.blk"
@@ -360,6 +488,31 @@ def _cmd_render(args: argparse.Namespace) -> None:
     print(args.output)
 
 
+def _cmd_generate_route1(args: argparse.Namespace) -> None:
+    repo = Path(args.repo)
+    output = Path(args.output)
+    route, generated, manifest = generate_route1_variant(repo, args.seed)
+    block_path, manifest_path = write_route1_variant(repo, args.seed, output)
+
+    generated_map = NativeMap(
+        name=route.name,
+        map_id=route.map_id,
+        width=route.width,
+        height=route.height,
+        tileset=route.tileset,
+        border_block=route.border_block,
+        connections=route.connections,
+        warps=route.warps,
+        backgrounds=route.backgrounds,
+        objects=route.objects,
+        block_bytes=generated,
+    )
+    render_map(repo, generated_map, output / "Route1.generated.png", args.scale)
+    print(json.dumps(manifest, indent=2))
+    print(f"native patch: {block_path}")
+    print(f"manifest: {manifest_path}")
+
+
 def _cmd_verify_pallet(args: argparse.Namespace) -> None:
     repo = Path(args.repo)
     native_map = assert_pallet_town(repo)
@@ -401,6 +554,16 @@ def build_parser() -> argparse.ArgumentParser:
     pallet.add_argument("--output")
     pallet.add_argument("--scale", type=int, default=2)
     pallet.set_defaults(func=_cmd_verify_pallet)
+
+    route1 = sub.add_parser(
+        "generate-route1",
+        help="generate a conservative collision-equivalent native Route 1 variant",
+    )
+    route1.add_argument("--repo", required=True)
+    route1.add_argument("--output", required=True)
+    route1.add_argument("--seed", type=int, default=42)
+    route1.add_argument("--scale", type=int, default=2)
+    route1.set_defaults(func=_cmd_generate_route1)
 
     return parser
 
