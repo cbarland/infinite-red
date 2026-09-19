@@ -1,0 +1,60 @@
+name: native-pokered-roundtrip
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pallet-roundtrip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Infinite Red
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned pokered
+        shell: bash
+        run: |
+          set -euo pipefail
+          PIN="$(python - <<'PY'
+          import tomllib
+          with open("config/pokered-source.toml", "rb") as f:
+              print(tomllib.load(f)["commit"])
+          PY
+          )"
+          git clone --filter=blob:none --no-checkout https://github.com/pret/pokered.git "$RUNNER_TEMP/pokered"
+          git -C "$RUNNER_TEMP/pokered" fetch --depth 1 origin "$PIN"
+          git -C "$RUNNER_TEMP/pokered" checkout --detach "$PIN"
+          test "$(git -C "$RUNNER_TEMP/pokered" rev-parse HEAD)" = "$PIN"
+
+      - name: Install native adapter requirements
+        run: python -m pip install -r tools/native/requirements.txt
+
+      - name: Syntax check native adapter
+        run: python -m py_compile tools/native/pokered_native.py tools/native/test_pokered_native.py
+
+      - name: Run native parser tests
+        env:
+          POKERED_REPO: ${{ runner.temp }}/pokered
+          PYTHONPATH: tools/native
+        run: python -m unittest tools/native/test_pokered_native.py -v
+
+      - name: Verify and render Pallet Town
+        run: |
+          python tools/native/pokered_native.py verify-pallet \
+            --repo "$RUNNER_TEMP/pokered" \
+            --output "$RUNNER_TEMP/native-pallet" \
+            --scale 3
+
+      - name: Assert exact block round-trip
+        run: cmp "$RUNNER_TEMP/pokered/maps/PalletTown.blk" "$RUNNER_TEMP/native-pallet/PalletTown.blk"
+
+      - name: Upload native Pallet proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-pallet-roundtrip
+          path: ${{ runner.temp }}/native-pallet/
+          if-no-files-found: error
