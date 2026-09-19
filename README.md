@@ -29,4 +29,6 @@ Only after native offline generation is proven will we modify the game framework
 
 ROM occupancy is now an explicit progression input. As allocatable ROM space fills, the Director should converge: raise the difficulty floor, stop opening new story threads, resolve outstanding promises, narrow branching, and force a coherent finale before capacity is exhausted. Jev is the intended high-frequency structured decision layer; Needle 3 is the optional on-device structured story planner.
 
+For map generation, the current first-vertical path is **graph macro-topology + deterministic validation + Jev candidate/style decisions + native Red materialization**. WFC and tiny masked diffusion are kept as benchmarked research alternatives; diffusion currently looks more promising as constrained terrain infill than as the owner of whole-route topology. See `docs/generator-bakeoff-results.md`.
+
 See `docs/architecture.md`, `docs/native-data-pipeline.md`, and `docs/roadmap.md`.
