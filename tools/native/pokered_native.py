@@ -522,7 +522,131 @@ def generate_first_route(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]
 
 def _replace_name_label(text: str, label: str, value: str) -> str:
     pattern = re.compile(
-        rf'^{re.escape(label)}:\s+db\s+"[^"]*@"
+        rf'^{re.escape(label)}:\\s+db\\s+"[^"]*@"$', re.MULTILINE
+    )
+    replacement = f'{label}: db "{value}@"'
+    updated, count = pattern.subn(replacement, text)
+    if count != 1:
+        raise ValueError(f"expected one {label} entry, replaced {count}")
+    return updated
+
+
+def _generated_route_objects(manifest: dict) -> str:
+    sign_x, sign_y = manifest["placements"]["sign"]
+    npc1_x, npc1_y = manifest["placements"]["npc1"]
+    npc2_x, npc2_y = manifest["placements"]["npc2"]
+    return f"""\tobject_const_def
+\tconst_export ROUTE1_YOUNGSTER1
+\tconst_export ROUTE1_YOUNGSTER2
+
+Route1_Object:
+\tdb $b ; border block
+
+\tdef_warp_events
+
+\tdef_bg_events
+\tbg_event {sign_x:2d}, {sign_y:2d}, TEXT_ROUTE1_SIGN
+
+\tdef_object_events
+\tobject_event {npc1_x:2d}, {npc1_y:2d}, SPRITE_YOUNGSTER, WALK, ANY_DIR, TEXT_ROUTE1_YOUNGSTER1
+\tobject_event {npc2_x:2d}, {npc2_y:2d}, SPRITE_YOUNGSTER, WALK, ANY_DIR, TEXT_ROUTE1_YOUNGSTER2
+
+\tdef_warps_to ROUTE_1
+"""
+
+
+def _generated_route_text(manifest: dict) -> str:
+    route_name = manifest["route_name"]
+    settlement = manifest["north_settlement_name"]
+    return f"""_Route1Youngster1MartSampleText::
+\ttext "Heading north?"
+\tline "Take this POTION."
+
+\tpara "The wilds beyond"
+\tline "PALLET TOWN can"
+\tcont "be unforgiving."
+\tprompt
+
+_Route1Youngster1GotPotionText::
+\ttext "<PLAYER> got"
+\tline "@"
+\ttext_ram wStringBuffer
+\ttext "!@"
+\ttext_end
+
+_Route1Youngster1AlsoGotPokeballsText::
+\ttext "The trail changes"
+\tline "every journey."
+\tdone
+
+_Route1Youngster1NoRoomText::
+\ttext "You have too much"
+\tline "stuff with you!"
+\tdone
+
+_Route1Youngster2Text::
+\ttext "Nobody agrees"
+\tline "what lies ahead."
+
+\tpara "Around here, they"
+\tline "call this road"
+\tcont "{route_name}."
+\tdone
+
+_Route1SignText::
+\ttext "{route_name}"
+\tline "PALLET TOWN -"
+\tcont "{settlement}"
+\tdone
+"""
+
+
+def write_first_geography(repo: Path, seed: int, output_dir: Path) -> dict:
+    slot, generated, manifest = generate_first_route(repo, seed)
+    patch_root = output_dir / "patch"
+    (patch_root / "maps").mkdir(parents=True, exist_ok=True)
+    (patch_root / "data" / "maps" / "objects").mkdir(parents=True, exist_ok=True)
+    (patch_root / "data" / "maps").mkdir(parents=True, exist_ok=True)
+    (patch_root / "text").mkdir(parents=True, exist_ok=True)
+
+    (patch_root / "maps" / "Route1.blk").write_bytes(generated)
+
+    names_path = repo / "data" / "maps" / "names.asm"
+    names_text = names_path.read_text(encoding="utf-8")
+    names_text = _replace_name_label(names_text, "Route1Name", manifest["route_name"])
+    names_text = _replace_name_label(
+        names_text, "ViridianCityName", manifest["north_settlement_name"]
+    )
+    (patch_root / "data" / "maps" / "names.asm").write_text(
+        names_text, encoding="utf-8"
+    )
+    (patch_root / "data" / "maps" / "objects" / "Route1.asm").write_text(
+        _generated_route_objects(manifest), encoding="utf-8"
+    )
+    (patch_root / "text" / "Route1.asm").write_text(
+        _generated_route_text(manifest), encoding="utf-8"
+    )
+
+    generated_map = NativeMap(
+        name=slot.name,
+        map_id=slot.map_id,
+        width=slot.width,
+        height=slot.height,
+        tileset=slot.tileset,
+        border_block=slot.border_block,
+        connections=slot.connections,
+        warps=[],
+        backgrounds=[],
+        objects=[],
+        block_bytes=generated,
+    )
+    render_map(repo, generated_map, output_dir / "FirstRoute.generated.png", 3)
+    (output_dir / "FirstGeography.generated.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    return manifest
+
+
 def generate_route1_variant(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]:
     """Generate a conservative native Route 1 variant.
 
