@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from pokered_native import NativeMap, load_blockset, load_map, parse_header, render_map
-from bakeoff import tile_connectivity
+from bakeoff import choose_north_exit, tile_connectivity
 
 SOLID = 0
 MIXED = 1
@@ -173,8 +173,8 @@ def collect(sources: list[tuple[str, Path]]) -> Corpus:
 
 
 def north_exit(seed: int):
-    rng = random.Random(seed ^ 0xB10C)
-    return rng.randrange(4, W - 6)
+    # Align exactly with the native block-level validator/materializer.
+    return choose_north_exit(seed) * 2
 
 
 def base_seam(base: Path):
