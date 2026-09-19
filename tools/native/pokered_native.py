@@ -31,6 +31,19 @@ OVERWORLD_GRASS = 0x52
 OVERWORLD_WARP_TILES = {0x1B, 0x58}
 OVERWORLD_LEDGE_TILES = {0x37, 0x36, 0x27, 0x0D, 0x1D}
 
+FIRST_ROUTE_GROUND = 0x0A
+FIRST_ROUTE_PATH = 0x31
+FIRST_ROUTE_GRASS = 0x0B
+FIRST_ROUTE_LEFT_EDGE = (0x4E, 0x6D)
+FIRST_ROUTE_RIGHT_EDGE = (0x4D, 0x6E)
+
+NAME_PREFIXES = (
+    "CEDAR", "AMBER", "MIST", "WILLOW", "FERN", "PINE", "SILVER", "MOSS",
+    "STONE", "MAPLE", "BIRCH", "CLOVER", "HAZEL", "IVY", "RAVEN", "GOLDEN",
+)
+ROUTE_SUFFIXES = ("PATH", "TRAIL", "PASS", "ROAD", "WAY", "RIDGE", "RUN")
+SETTLEMENT_SUFFIXES = ("TOWN", "CITY", "VALE", "HAVEN")
+
 MAP_CONST_RE = re.compile(
     r"^\s*map_const\s+(?P<id>[A-Z0-9_]+),\s*(?P<width>\d+),\s*(?P<height>\d+)",
     re.MULTILINE,
@@ -327,6 +340,318 @@ def _stable_index(seed: int, x: int, y: int, block_id: int, count: int) -> int:
     return int.from_bytes(digest, "little") % count
 
 
+def _stable_choice(seed: int, namespace: str, values: tuple[str, ...]) -> str:
+    payload = f"{seed}:{namespace}".encode("ascii")
+    digest = hashlib.blake2s(payload, digest_size=8).digest()
+    return values[int.from_bytes(digest, "little") % len(values)]
+
+
+def generate_location_names(seed: int) -> dict[str, str]:
+    route_prefix = _stable_choice(seed, "route-prefix", NAME_PREFIXES)
+    settlement_prefix = _stable_choice(seed, "settlement-prefix", NAME_PREFIXES)
+    if settlement_prefix == route_prefix:
+        index = (NAME_PREFIXES.index(settlement_prefix) + 5) % len(NAME_PREFIXES)
+        settlement_prefix = NAME_PREFIXES[index]
+
+    route = f"{route_prefix} {_stable_choice(seed, 'route-suffix', ROUTE_SUFFIXES)}"
+    settlement = (
+        f"{settlement_prefix} "
+        f"{_stable_choice(seed, 'settlement-suffix', SETTLEMENT_SUFFIXES)}"
+    )
+    if len(route) > 18 or len(settlement) > 18:
+        raise AssertionError("generated location name exceeds Red display budget")
+    return {"route": route, "settlement": settlement}
+
+
+def _first_route_path_centers(seed: int, height: int) -> list[int]:
+    centers = [0] * height
+    centers[height - 2] = 2
+    for y in range(height - 3, -1, -1):
+        previous = centers[y + 1]
+        payload = f"{seed}:path-step:{y}".encode("ascii")
+        roll = hashlib.blake2s(payload, digest_size=1).digest()[0] % 5
+        step = (-1, -1, 0, 1, 1)[roll]
+        centers[y] = max(1, min(7, previous + step))
+    return centers
+
+
+def _walkable_tile_grid(native_map: NativeMap, blockset: bytes) -> list[list[bool]]:
+    tiles = expand_blocks(native_map, blockset)
+    return [[tile in OVERWORLD_WALKABLE for tile in row] for row in tiles]
+
+
+def _reachable(
+    walkable: list[list[bool]],
+    start: tuple[int, int],
+    targets: set[tuple[int, int]],
+) -> bool:
+    width = len(walkable[0])
+    height = len(walkable)
+    if not walkable[start[1]][start[0]]:
+        return False
+    seen = {start}
+    stack = [start]
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in targets:
+            return True
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if (
+                0 <= nx < width
+                and 0 <= ny < height
+                and walkable[ny][nx]
+                and (nx, ny) not in seen
+            ):
+                seen.add((nx, ny))
+                stack.append((nx, ny))
+    return False
+
+
+def generate_first_route(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]:
+    """Construct first post-Pallet geography from native blocks.
+
+    Only the south block row is inherited, because it is the physical seam to
+    authored Pallet Town. The rest of the route is generated from scratch.
+    """
+    slot = load_map(repo, "Route1")
+    if slot.tileset != "OVERWORLD" or (slot.width, slot.height) != (10, 18):
+        raise ValueError("first route expects the ROUTE_1 10x18 OVERWORLD slot")
+
+    width, height = slot.width, slot.height
+    blocks = [FIRST_ROUTE_GROUND] * (width * height)
+    centers = _first_route_path_centers(seed, height)
+
+    south = slot.block_bytes[(height - 1) * width : height * width]
+    blocks[(height - 1) * width : height * width] = south
+
+    for y in range(height - 1):
+        left = FIRST_ROUTE_LEFT_EDGE[
+            _stable_index(seed, 0, y, FIRST_ROUTE_LEFT_EDGE[0], len(FIRST_ROUTE_LEFT_EDGE))
+        ]
+        right = FIRST_ROUTE_RIGHT_EDGE[
+            _stable_index(seed, width - 1, y, FIRST_ROUTE_RIGHT_EDGE[0], len(FIRST_ROUTE_RIGHT_EDGE))
+        ]
+        blocks[y * width] = left
+        blocks[y * width + width - 1] = right
+
+    for y in range(height - 1):
+        center = centers[y]
+        blocks[y * width + center] = FIRST_ROUTE_PATH
+        blocks[y * width + center + 1] = FIRST_ROUTE_PATH
+
+    for y in range(height - 1):
+        center = centers[y]
+        for x in range(1, width - 1):
+            if x in (center, center + 1):
+                continue
+            roll = _stable_index(seed, x, y, FIRST_ROUTE_GRASS, 100)
+            if roll < 42:
+                blocks[y * width + x] = FIRST_ROUTE_GRASS
+
+    spur_y = 7 + _stable_index(seed, 3, 7, FIRST_ROUTE_PATH, 4)
+    center = centers[spur_y]
+    go_right = _stable_index(seed, center, spur_y, FIRST_ROUTE_PATH, 2) == 0
+    room_right = (width - 2) - (center + 1)
+    room_left = center - 1
+    if (go_right and room_right >= 2) or room_left < 2:
+        end = min(width - 1, center + 5)
+        spur_cells = list(range(center + 2, end))
+    else:
+        start = max(1, center - 3)
+        spur_cells = list(range(start, center))
+    if len(spur_cells) < 2:
+        raise AssertionError("generated route spur did not have room to materialize")
+    for x in spur_cells:
+        blocks[spur_y * width + x] = FIRST_ROUTE_PATH
+
+    generated = bytes(blocks)
+    if generated == slot.block_bytes:
+        raise AssertionError("generated geography unexpectedly matches original Route 1")
+
+    same_cells = sum(a == b for a, b in zip(generated, slot.block_bytes))
+    if same_cells > 70:
+        raise AssertionError(
+            f"generated route resembles source too closely ({same_cells}/180 cells same)"
+        )
+
+    generated_map = NativeMap(
+        name=slot.name,
+        map_id=slot.map_id,
+        width=width,
+        height=height,
+        tileset=slot.tileset,
+        border_block=slot.border_block,
+        connections=slot.connections,
+        warps=[],
+        backgrounds=[],
+        objects=[],
+        block_bytes=generated,
+    )
+    blockset = load_blockset(repo, generated_map.tileset)
+    walkable = _walkable_tile_grid(generated_map, blockset)
+
+    south_start = (2 * BLOCK_TILES + 1, height * BLOCK_TILES - 1)
+    north_center = centers[0]
+    north_targets = {
+        (north_center * BLOCK_TILES + dx, 0)
+        for dx in range(BLOCK_TILES * 2)
+    }
+    if not _reachable(walkable, south_start, north_targets):
+        raise AssertionError("generated first route has no Pallet-to-north traversal")
+
+    names = generate_location_names(seed)
+    sign_block_x = spur_cells[-1] if spur_cells else center
+    npc1_y = 11
+    npc2_y = 4
+    manifest = {
+        "seed": seed,
+        "slot": "ROUTE_1",
+        "route_name": names["route"],
+        "north_settlement_name": names["settlement"],
+        "dimensions": [width, height],
+        "tileset": slot.tileset,
+        "south_seam": "byte-identical to Route1 south row for PALLET_TOWN connection",
+        "source_same_cells": same_cells,
+        "generated_cells": width * height - width,
+        "path_centers": centers[:-1],
+        "spur": {"y": spur_y, "cells": spur_cells},
+        "placements": {
+            "sign": [sign_block_x * 2 + 1, spur_y * 2 + 1],
+            "npc1": [centers[npc1_y] * 2 + 1, npc1_y * 2 + 1],
+            "npc2": [(centers[npc2_y] + 1) * 2, npc2_y * 2 + 1],
+        },
+        "generated_sha256": hashlib.sha256(generated).hexdigest(),
+        "safety": "native_blocks; south_seam_preserved; bfs_pallet_to_north",
+    }
+    return slot, generated, manifest
+
+
+def _replace_name_label(text: str, label: str, value: str) -> str:
+    lines = text.splitlines()
+    matches = [i for i, line in enumerate(lines) if line.startswith(f"{label}:")]
+    if len(matches) != 1:
+        raise ValueError(f"expected one {label} entry, found {len(matches)}")
+    lines[matches[0]] = f'{label}: db "{value}@"'
+    ending = "\n" if text.endswith("\n") else ""
+    return "\n".join(lines) + ending
+
+
+def _generated_route_objects(manifest: dict) -> str:
+    sign_x, sign_y = manifest["placements"]["sign"]
+    npc1_x, npc1_y = manifest["placements"]["npc1"]
+    npc2_x, npc2_y = manifest["placements"]["npc2"]
+    return f"""\tobject_const_def
+\tconst_export ROUTE1_YOUNGSTER1
+\tconst_export ROUTE1_YOUNGSTER2
+
+Route1_Object:
+\tdb $b ; border block
+
+\tdef_warp_events
+
+\tdef_bg_events
+\tbg_event {sign_x:2d}, {sign_y:2d}, TEXT_ROUTE1_SIGN
+
+\tdef_object_events
+\tobject_event {npc1_x:2d}, {npc1_y:2d}, SPRITE_YOUNGSTER, WALK, ANY_DIR, TEXT_ROUTE1_YOUNGSTER1
+\tobject_event {npc2_x:2d}, {npc2_y:2d}, SPRITE_YOUNGSTER, WALK, ANY_DIR, TEXT_ROUTE1_YOUNGSTER2
+
+\tdef_warps_to ROUTE_1
+"""
+
+
+def _generated_route_text(manifest: dict) -> str:
+    route_name = manifest["route_name"]
+    settlement = manifest["north_settlement_name"]
+    return f"""_Route1Youngster1MartSampleText::
+\ttext "Heading north?"
+\tline "Take this POTION."
+
+\tpara "The wilds beyond"
+\tline "PALLET TOWN can"
+\tcont "be unforgiving."
+\tprompt
+
+_Route1Youngster1GotPotionText::
+\ttext "<PLAYER> got"
+\tline "@"
+\ttext_ram wStringBuffer
+\ttext "!@"
+\ttext_end
+
+_Route1Youngster1AlsoGotPokeballsText::
+\ttext "The trail changes"
+\tline "every journey."
+\tdone
+
+_Route1Youngster1NoRoomText::
+\ttext "You have too much"
+\tline "stuff with you!"
+\tdone
+
+_Route1Youngster2Text::
+\ttext "Nobody agrees"
+\tline "what lies ahead."
+
+\tpara "Around here, they"
+\tline "call this road"
+\tcont "{route_name}."
+\tdone
+
+_Route1SignText::
+\ttext "{route_name}"
+\tline "PALLET TOWN -"
+\tcont "{settlement}"
+\tdone
+"""
+
+
+def write_first_geography(repo: Path, seed: int, output_dir: Path) -> dict:
+    slot, generated, manifest = generate_first_route(repo, seed)
+    patch_root = output_dir / "patch"
+    (patch_root / "maps").mkdir(parents=True, exist_ok=True)
+    (patch_root / "data" / "maps" / "objects").mkdir(parents=True, exist_ok=True)
+    (patch_root / "data" / "maps").mkdir(parents=True, exist_ok=True)
+    (patch_root / "text").mkdir(parents=True, exist_ok=True)
+
+    (patch_root / "maps" / "Route1.blk").write_bytes(generated)
+
+    names_path = repo / "data" / "maps" / "names.asm"
+    names_text = names_path.read_text(encoding="utf-8")
+    names_text = _replace_name_label(names_text, "Route1Name", manifest["route_name"])
+    names_text = _replace_name_label(
+        names_text, "ViridianCityName", manifest["north_settlement_name"]
+    )
+    (patch_root / "data" / "maps" / "names.asm").write_text(
+        names_text, encoding="utf-8"
+    )
+    (patch_root / "data" / "maps" / "objects" / "Route1.asm").write_text(
+        _generated_route_objects(manifest), encoding="utf-8"
+    )
+    (patch_root / "text" / "Route1.asm").write_text(
+        _generated_route_text(manifest), encoding="utf-8"
+    )
+
+    generated_map = NativeMap(
+        name=slot.name,
+        map_id=slot.map_id,
+        width=slot.width,
+        height=slot.height,
+        tileset=slot.tileset,
+        border_block=slot.border_block,
+        connections=slot.connections,
+        warps=[],
+        backgrounds=[],
+        objects=[],
+        block_bytes=generated,
+    )
+    render_map(repo, generated_map, output_dir / "FirstRoute.generated.png", 3)
+    (output_dir / "FirstGeography.generated.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    return manifest
+
+
 def generate_route1_variant(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]:
     """Generate a conservative native Route 1 variant.
 
@@ -488,6 +813,11 @@ def _cmd_render(args: argparse.Namespace) -> None:
     print(args.output)
 
 
+def _cmd_generate_first_geography(args: argparse.Namespace) -> None:
+    manifest = write_first_geography(Path(args.repo), args.seed, Path(args.output))
+    print(json.dumps(manifest, indent=2))
+
+
 def _cmd_generate_route1(args: argparse.Namespace) -> None:
     repo = Path(args.repo)
     output = Path(args.output)
@@ -564,6 +894,15 @@ def build_parser() -> argparse.ArgumentParser:
     route1.add_argument("--seed", type=int, default=42)
     route1.add_argument("--scale", type=int, default=2)
     route1.set_defaults(func=_cmd_generate_route1)
+
+    geography = sub.add_parser(
+        "generate-first-geography",
+        help="construct first post-Pallet geography and player-facing names",
+    )
+    geography.add_argument("--repo", required=True)
+    geography.add_argument("--output", required=True)
+    geography.add_argument("--seed", type=int, default=42)
+    geography.set_defaults(func=_cmd_generate_first_geography)
 
     return parser
 

@@ -2,6 +2,8 @@
 
 Infinite Red is an open-ended Pokémon Red world directed by a constrained decision system and materialized as **native Pokémon Red game data**.
 
+**Pallet Town is the only fixed location.** Beyond it, original Kanto map IDs are implementation slots rather than canonical places; generated runs receive new layouts, names, encounters, and story identities.
+
 ## Core rule
 
 **Arrange the game; do not rebuild the game.**

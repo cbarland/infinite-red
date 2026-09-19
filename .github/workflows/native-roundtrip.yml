@@ -52,16 +52,18 @@ jobs:
       - name: Assert exact block round-trip
         run: cmp "$RUNNER_TEMP/pokered/maps/PalletTown.blk" "$RUNNER_TEMP/native-pallet/PalletTown.blk"
 
-      - name: Generate native Route 1 variant
+      - name: Generate first post-Pallet geography
         run: |
-          python tools/native/pokered_native.py generate-route1 \
+          python tools/native/pokered_native.py generate-first-geography \
             --repo "$RUNNER_TEMP/pokered" \
-            --output "$RUNNER_TEMP/generated-route1" \
-            --seed 42 \
-            --scale 3
-          test -s "$RUNNER_TEMP/generated-route1/maps/Route1.blk"
-          test -s "$RUNNER_TEMP/generated-route1/Route1.generated.png"
-          ! cmp -s "$RUNNER_TEMP/pokered/maps/Route1.blk" "$RUNNER_TEMP/generated-route1/maps/Route1.blk"
+            --output "$RUNNER_TEMP/first-geography" \
+            --seed 42
+          test -s "$RUNNER_TEMP/first-geography/patch/maps/Route1.blk"
+          test -s "$RUNNER_TEMP/first-geography/FirstRoute.generated.png"
+          test -s "$RUNNER_TEMP/first-geography/FirstGeography.generated.json"
+          ! cmp -s "$RUNNER_TEMP/pokered/maps/Route1.blk" "$RUNNER_TEMP/first-geography/patch/maps/Route1.blk"
+          ! grep -q 'ROUTE 1' "$RUNNER_TEMP/first-geography/patch/text/Route1.asm"
+          ! grep -q 'VIRIDIAN CITY' "$RUNNER_TEMP/first-geography/patch/text/Route1.asm"
 
       - name: Install pinned RGBDS
         shell: bash
@@ -80,19 +82,19 @@ jobs:
           "$RGBASM" --version | tee "$RUNNER_TEMP/rgbds-version.txt"
           grep -q "1.0.3" "$RUNNER_TEMP/rgbds-version.txt"
 
-      - name: Build pokered with generated Route 1
+      - name: Build pokered with generated geography
         shell: bash
         run: |
           set -euo pipefail
-          cp "$RUNNER_TEMP/generated-route1/maps/Route1.blk" "$RUNNER_TEMP/pokered/maps/Route1.blk"
+          cp -R "$RUNNER_TEMP/first-geography/patch/." "$RUNNER_TEMP/pokered/"
           make -C "$RUNNER_TEMP/pokered" RGBDS="$RGBDS_DIR/" pokered.gbc
           test -s "$RUNNER_TEMP/pokered/pokered.gbc"
           test -s "$RUNNER_TEMP/pokered/pokered.map"
           sha256sum "$RUNNER_TEMP/pokered/pokered.gbc"
-          echo "stock-engine build accepted generated Route 1"
+          echo "stock-engine build accepted generated geography + names"
 
       - name: Preserve linker map, not ROM
-        run: cp "$RUNNER_TEMP/pokered/pokered.map" "$RUNNER_TEMP/generated-route1/pokered.generated.map"
+        run: cp "$RUNNER_TEMP/pokered/pokered.map" "$RUNNER_TEMP/first-geography/pokered.generated.map"
 
       - name: Upload native proof artifacts
         uses: actions/upload-artifact@v4
@@ -100,5 +102,5 @@ jobs:
           name: native-map-proofs
           path: |
             ${{ runner.temp }}/native-pallet/
-            ${{ runner.temp }}/generated-route1/
+            ${{ runner.temp }}/first-geography/
           if-no-files-found: error

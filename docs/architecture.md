@@ -4,6 +4,8 @@
 
 Infinite Red should feel like Pokémon Red discovering a coherent world beyond the edge of the cartridge.
 
+**Pallet Town is the sole authored geographic anchor.** Existing Kanto map IDs may serve as invisible compatibility slots, but beyond Pallet Town the Director owns geography, place names, topology, encounters, NPCs, and story identity.
+
 The governing implementation rule is **data first, engine changes last**. The decompilation is the game. Infinite Red should arrange and generate the same data the original engine already consumes instead of recreating movement, battles, collision, encounters, menus, maps, or rendering in another runtime.
 
 ## Design law: native Red data
