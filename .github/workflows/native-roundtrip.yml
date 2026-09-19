@@ -52,9 +52,22 @@ jobs:
       - name: Assert exact block round-trip
         run: cmp "$RUNNER_TEMP/pokered/maps/PalletTown.blk" "$RUNNER_TEMP/native-pallet/PalletTown.blk"
 
-      - name: Upload native Pallet proof
+      - name: Generate native Route 1 variant
+        run: |
+          python tools/native/pokered_native.py generate-route1 \
+            --repo "$RUNNER_TEMP/pokered" \
+            --output "$RUNNER_TEMP/generated-route1" \
+            --seed 42 \
+            --scale 3
+          test -s "$RUNNER_TEMP/generated-route1/maps/Route1.blk"
+          test -s "$RUNNER_TEMP/generated-route1/Route1.generated.png"
+          ! cmp -s "$RUNNER_TEMP/pokered/maps/Route1.blk" "$RUNNER_TEMP/generated-route1/maps/Route1.blk"
+
+      - name: Upload native proof artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: native-pallet-roundtrip
-          path: ${{ runner.temp }}/native-pallet/
+          name: native-map-proofs
+          path: |
+            ${{ runner.temp }}/native-pallet/
+            ${{ runner.temp }}/generated-route1/
           if-no-files-found: error
