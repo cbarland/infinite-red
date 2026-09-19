@@ -377,42 +377,325 @@ def generate_location_names(seed: int) -> dict[str, str]:
     return {"route": route, "settlement": settlement}
 
 
-def _first_route_path_centers(seed: int, height: int) -> list[int]:
-    centers = [0] * height
-    centers[height - 2] = 2
-    for y in range(height - 3, -1, -1):
-        previous = centers[y + 1]
-        payload = f"{seed}:path-step:{y}".encode("ascii")
-        roll = hashlib.blake2s(payload, digest_size=1).digest()[0] % 5
-        step = (-1, -1, 0, 1, 1)[roll]
-        centers[y] = max(1, min(7, previous + step))
-    return centers
+def _semantic_quadrant_class(tiles: list[int]) -> int:
+    if sum(tile == OVERWORLD_GRASS for tile in tiles) >= 2:
+        return SEM_GRASS
+    walk_fraction = sum(tile in OVERWORLD_WALKABLE for tile in tiles) / 4.0
+    if walk_fraction >= 0.75:
+        return SEM_OPEN
+    if walk_fraction <= 0.25:
+        return SEM_SOLID
+    return SEM_MIXED
 
 
-def _walkable_tile_grid(native_map: NativeMap, blockset: bytes) -> list[list[bool]]:
-    tiles = expand_blocks(native_map, blockset)
-    return [[tile in OVERWORLD_WALKABLE for tile in row] for row in tiles]
+def _native_block_semantic_signature(blockset: bytes, block_id: int) -> tuple[int, ...]:
+    block = _block_tiles(blockset, block_id)
+    result: list[int] = []
+    for qy in range(2):
+        for qx in range(2):
+            tiles = [
+                block[(qy * 2 + ty) * 4 + (qx * 2 + tx)]
+                for ty in range(2)
+                for tx in range(2)
+            ]
+            result.append(_semantic_quadrant_class(tiles))
+    return tuple(result)
 
 
-def _reachable(
-    walkable: list[list[bool]],
+def _semantic_south_seam(slot: NativeMap, blockset: bytes) -> list[list[int]]:
+    seam = [[SEM_SOLID for _ in range(SEM_W)] for _ in range(2)]
+    y = slot.height - 1
+    for bx in range(slot.width):
+        block_id = slot.block_bytes[y * slot.width + bx]
+        sig = _native_block_semantic_signature(blockset, block_id)
+        seam[0][bx * 2] = sig[0]
+        seam[0][bx * 2 + 1] = sig[1]
+        seam[1][bx * 2] = sig[2]
+        seam[1][bx * 2 + 1] = sig[3]
+    return seam
+
+
+def _block_edge_reachable_columns(
+    blockset: bytes, block_id: int, from_bottom: bool
+) -> set[int]:
+    block = _block_tiles(blockset, block_id)
+    walk = [
+        [block[y * 4 + x] in OVERWORLD_WALKABLE for x in range(4)]
+        for y in range(4)
+    ]
+    starts = [
+        (x, 3 if from_bottom else 0)
+        for x in range(4)
+        if walk[3 if from_bottom else 0][x]
+    ]
+    seen = set(starts)
+    stack = list(starts)
+    target_y = 0 if from_bottom else 3
+    result: set[int] = set()
+    while stack:
+        x, y = stack.pop()
+        if y == target_y:
+            result.add(x)
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if (
+                0 <= nx < 4
+                and 0 <= ny < 4
+                and walk[ny][nx]
+                and (nx, ny) not in seen
+            ):
+                seen.add((nx, ny))
+                stack.append((nx, ny))
+    return result
+
+
+def _pallet_route_entry_block(repo: Path, slot: NativeMap, blockset: bytes) -> int:
+    pallet = load_map(repo, "PalletTown")
+    if pallet.width != slot.width:
+        raise ValueError("first route expects Pallet and route widths to match")
+
+    candidates: list[int] = []
+    for bx in range(slot.width):
+        pallet_id = pallet.block_bytes[bx]
+        route_id = slot.block_bytes[(slot.height - 1) * slot.width + bx]
+        pallet_cols = _block_edge_reachable_columns(
+            blockset, pallet_id, from_bottom=True
+        )
+        route_cols = _block_edge_reachable_columns(
+            blockset, route_id, from_bottom=True
+        )
+        if pallet_cols & route_cols:
+            candidates.append(bx)
+    if not candidates:
+        raise AssertionError("Pallet seam has no vertically traversable connection block")
+    center = (slot.width - 1) / 2.0
+    return min(candidates, key=lambda x: (abs(x - center), x))
+
+
+def _semantic_exit_block(seed: int, width: int) -> int:
+    return 2 + _stable_index(seed, 991, 7, 0x31, max(1, width - 5))
+
+
+def _carve_semantic(
+    grid: list[list[int]],
+    rng: random.Random,
     start: tuple[int, int],
-    targets: set[tuple[int, int]],
+    end: tuple[int, int],
+    width: int,
+) -> None:
+    x, y = start
+    tx, ty = end
+    while (x, y) != (tx, ty):
+        for dx in range(width):
+            px = x + dx
+            if 1 <= px < SEM_W - 1 and 0 <= y < SEM_H - 2:
+                grid[y][px] = SEM_OPEN
+        if x != tx and (y == ty or rng.random() < 0.48):
+            x += 1 if tx > x else -1
+        elif y != ty:
+            y += 1 if ty > y else -1
+        else:
+            x += 1 if tx > x else -1
+    for dx in range(width):
+        px = x + dx
+        if 1 <= px < SEM_W - 1 and 0 <= y < SEM_H - 2:
+            grid[y][px] = SEM_OPEN
+
+
+def _paint_semantic_ellipse(
+    grid: list[list[int]],
+    cx: int,
+    cy: int,
+    rx: int,
+    ry: int,
+    center_class: int,
+    preserve_open: bool,
+) -> None:
+    for y in range(max(2, cy - ry), min(SEM_H - 2, cy + ry + 1)):
+        for x in range(max(2, cx - rx), min(SEM_W - 2, cx + rx + 1)):
+            distance = ((x - cx) / max(1, rx)) ** 2 + ((y - cy) / max(1, ry)) ** 2
+            if distance > 1.0:
+                continue
+            if preserve_open and grid[y][x] == SEM_OPEN:
+                continue
+            if center_class == SEM_SOLID and distance > 0.72:
+                grid[y][x] = SEM_MIXED
+            else:
+                grid[y][x] = center_class
+
+
+def _nearest_semantic_open(
+    grid: list[list[int]], target_x: int, target_y: int
+) -> tuple[int, int]:
+    best: tuple[int, int, int] | None = None
+    for y in range(1, SEM_H - 2):
+        for x in range(1, SEM_W - 1):
+            if grid[y][x] != SEM_OPEN:
+                continue
+            distance = abs(x - target_x) + abs(y - target_y)
+            candidate = (distance, x, y)
+            if best is None or candidate < best:
+                best = candidate
+    if best is None:
+        raise AssertionError("generated semantic route contains no open placement cell")
+    return best[1], best[2]
+
+
+def _generate_semantic_route(
+    slot: NativeMap, blockset: bytes, seed: int, entry_block: int, exit_block: int
+) -> tuple[list[list[int]], dict]:
+    rng = random.Random(seed)
+    grid = [[SEM_GRASS for _ in range(SEM_W)] for _ in range(SEM_H)]
+
+    for y in range(SEM_H - 2):
+        grid[y][0] = SEM_SOLID
+        grid[y][1] = SEM_SOLID
+        grid[y][SEM_W - 2] = SEM_SOLID
+        grid[y][SEM_W - 1] = SEM_SOLID
+
+    start_x = entry_block * 2
+    exit_x = exit_block * 2
+    nodes: list[tuple[int, int]] = [(start_x, SEM_H - 3)]
+    for y in (30, 24, 18, 12, 6):
+        nodes.append((rng.randint(3, SEM_W - 7), y))
+    nodes.append((exit_x, 0))
+
+    for a, b in zip(nodes, nodes[1:]):
+        _carve_semantic(grid, rng, a, b, rng.choice((2, 3, 4)))
+
+    branches: list[dict] = []
+    for _ in range(2):
+        lower_index = rng.choice((1, 2, 3))
+        upper_index = min(lower_index + rng.choice((1, 2)), len(nodes) - 2)
+        y1 = nodes[lower_index][1]
+        y2 = nodes[upper_index][1]
+        side = 2 if rng.random() < 0.5 else SEM_W - 5
+        _carve_semantic(grid, rng, nodes[lower_index], (side, y1), 2)
+        _carve_semantic(grid, rng, (side, y1), (side, y2), 2)
+        _carve_semantic(grid, rng, (side, y2), nodes[upper_index], 2)
+        branches.append({"from": nodes[lower_index], "via": [side, y1, y2], "to": nodes[upper_index]})
+
+    clearings: list[tuple[int, int, int, int]] = []
+    for node_x, node_y in rng.sample(nodes[1:-1], k=2):
+        rx = rng.choice((2, 3, 4))
+        ry = rng.choice((2, 3))
+        _paint_semantic_ellipse(grid, node_x + 1, node_y, rx, ry, SEM_OPEN, False)
+        clearings.append((node_x + 1, node_y, rx, ry))
+
+    for _ in range(rng.randint(5, 8)):
+        cx = rng.randint(3, SEM_W - 4)
+        cy = rng.randint(4, SEM_H - 6)
+        rx = rng.choice((2, 3, 4))
+        ry = rng.choice((2, 3, 4))
+        _paint_semantic_ellipse(grid, cx, cy, rx, ry, SEM_SOLID, True)
+
+    seam = _semantic_south_seam(slot, blockset)
+    grid[SEM_H - 2] = seam[0]
+    grid[SEM_H - 1] = seam[1]
+
+    for y in (0, 1):
+        for x in range(exit_x, min(SEM_W, exit_x + 4)):
+            grid[y][x] = SEM_OPEN
+
+    return grid, {
+        "nodes": nodes,
+        "branches": branches,
+        "clearings": clearings,
+        "entry_block": entry_block,
+        "exit_block": exit_block,
+    }
+
+
+def _materialize_semantic_route(
+    slot: NativeMap, blockset: bytes, semantic: list[list[int]], seed: int
+) -> list[int]:
+    signatures = {
+        block_id: _native_block_semantic_signature(blockset, block_id)
+        for block_id in WOODLAND_ROUTE_BLOCKS
+    }
+    result = [FIRST_ROUTE_GROUND] * (slot.width * slot.height)
+    for by in range(slot.height):
+        for bx in range(slot.width):
+            if by == slot.height - 1:
+                result[by * slot.width + bx] = slot.block_bytes[
+                    by * slot.width + bx
+                ]
+                continue
+            desired = (
+                semantic[by * 2][bx * 2],
+                semantic[by * 2][bx * 2 + 1],
+                semantic[by * 2 + 1][bx * 2],
+                semantic[by * 2 + 1][bx * 2 + 1],
+            )
+            scored: list[tuple[int, int, int]] = []
+            for block_id, signature in signatures.items():
+                mismatch = sum(a != b for a, b in zip(desired, signature))
+                exact_surface_bonus = (
+                    -8
+                    if len(set(desired)) == 1
+                    and desired[0] in (SEM_OPEN, SEM_GRASS)
+                    and signature == desired
+                    else 0
+                )
+                tie = _stable_index(seed, bx, by, block_id, 7)
+                scored.append((mismatch * 10 + exact_surface_bonus, tie, block_id))
+            result[by * slot.width + bx] = min(scored)[2]
+    return result
+
+
+def _native_route_connected(
+    repo: Path,
+    slot: NativeMap,
+    blockset: bytes,
+    blocks: list[int],
+    entry_block: int,
+    exit_block: int,
 ) -> bool:
-    width = len(walkable[0])
-    height = len(walkable)
-    if not walkable[start[1]][start[0]]:
+    native = NativeMap(
+        name=slot.name,
+        map_id=slot.map_id,
+        width=slot.width,
+        height=slot.height,
+        tileset=slot.tileset,
+        border_block=slot.border_block,
+        connections=slot.connections,
+        warps=[],
+        backgrounds=[],
+        objects=[],
+        block_bytes=bytes(blocks),
+    )
+    walkable = _walkable_tile_grid(native, blockset)
+    pallet = load_map(repo, "PalletTown")
+    pallet_walkable = _walkable_tile_grid(pallet, blockset)
+
+    starts: list[tuple[int, int]] = []
+    for local_x in range(4):
+        global_x = entry_block * 4 + local_x
+        if (
+            walkable[-1][global_x]
+            and pallet_walkable[0][global_x]
+        ):
+            starts.append((global_x, len(walkable) - 1))
+    if not starts:
         return False
-    seen = {start}
-    stack = [start]
+
+    targets = {
+        (x, 0)
+        for x in range(exit_block * 4, min(slot.width * 4, (exit_block + 2) * 4))
+        if walkable[0][x]
+    }
+    if not targets:
+        return False
+
+    seen = set(starts)
+    stack = list(starts)
     while stack:
         x, y = stack.pop()
         if (x, y) in targets:
             return True
         for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
             if (
-                0 <= nx < width
-                and 0 <= ny < height
+                0 <= nx < len(walkable[0])
+                and 0 <= ny < len(walkable)
                 and walkable[ny][nx]
                 and (nx, ny) not in seen
             ):
@@ -421,121 +704,142 @@ def _reachable(
     return False
 
 
-def generate_first_route(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]:
-    """Construct first post-Pallet geography from native blocks.
+def _hard_repair_native_route(
+    repo: Path,
+    slot: NativeMap,
+    blockset: bytes,
+    semantic: list[list[int]],
+    blocks: list[int],
+    entry_block: int,
+    exit_block: int,
+) -> tuple[list[int], int]:
+    if _native_route_connected(
+        repo, slot, blockset, blocks, entry_block, exit_block
+    ):
+        return blocks, 0
 
-    Only the south block row is inherited, because it is the physical seam to
-    authored Pallet Town. The rest of the route is generated from scratch.
-    """
+    start = (entry_block, slot.height - 2)
+    targets = {(exit_block, 0), (min(slot.width - 1, exit_block + 1), 0)}
+    dist = {start: 0.0}
+    prev: dict[tuple[int, int], tuple[int, int]] = {}
+    heap: list[tuple[float, tuple[int, int]]] = [(0.0, start)]
+    target: tuple[int, int] | None = None
+    while heap:
+        cost, pos = heapq.heappop(heap)
+        if cost != dist[pos]:
+            continue
+        if pos in targets:
+            target = pos
+            break
+        x, y = pos
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if not (0 <= nx < slot.width and 0 <= ny < slot.height - 1):
+                continue
+            quad = [
+                semantic[ny * 2 + qy][nx * 2 + qx]
+                for qy in range(2)
+                for qx in range(2)
+            ]
+            openish = sum(v in (SEM_OPEN, SEM_GRASS) for v in quad) / 4.0
+            new_cost = cost + (1.0 - 0.8 * openish)
+            if new_cost < dist.get((nx, ny), 1e9):
+                dist[(nx, ny)] = new_cost
+                prev[(nx, ny)] = pos
+                heapq.heappush(heap, (new_cost, (nx, ny)))
+
+    if target is None:
+        raise AssertionError("could not derive native fallback route")
+
+    path: list[tuple[int, int]] = []
+    cur = target
+    while cur != start:
+        path.append(cur)
+        cur = prev[cur]
+    path.append(start)
+
+    repaired = list(blocks)
+    changes = 0
+    for x, y in path:
+        index = y * slot.width + x
+        if repaired[index] != FIRST_ROUTE_PATH:
+            repaired[index] = FIRST_ROUTE_PATH
+            changes += 1
+
+    if not _native_route_connected(
+        repo, slot, blockset, repaired, entry_block, exit_block
+    ):
+        raise AssertionError("native fallback failed to guarantee route connectivity")
+    return repaired, changes
+
+
+def _walkable_tile_grid(native_map: NativeMap, blockset: bytes) -> list[list[bool]]:
+    tiles = expand_blocks(native_map, blockset)
+    return [[tile in OVERWORLD_WALKABLE for tile in row] for row in tiles]
+
+
+def generate_first_route(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]:
+    """Generate the first post-Pallet route with half-block graph topology."""
     slot = load_map(repo, "Route1")
     if slot.tileset != "OVERWORLD" or (slot.width, slot.height) != (10, 18):
         raise ValueError("first route expects the ROUTE_1 10x18 OVERWORLD slot")
 
-    width, height = slot.width, slot.height
-    blocks = [FIRST_ROUTE_GROUND] * (width * height)
-    centers = _first_route_path_centers(seed, height)
-
-    south = slot.block_bytes[(height - 1) * width : height * width]
-    blocks[(height - 1) * width : height * width] = south
-
-    for y in range(height - 1):
-        left = FIRST_ROUTE_LEFT_EDGE[
-            _stable_index(seed, 0, y, FIRST_ROUTE_LEFT_EDGE[0], len(FIRST_ROUTE_LEFT_EDGE))
-        ]
-        right = FIRST_ROUTE_RIGHT_EDGE[
-            _stable_index(seed, width - 1, y, FIRST_ROUTE_RIGHT_EDGE[0], len(FIRST_ROUTE_RIGHT_EDGE))
-        ]
-        blocks[y * width] = left
-        blocks[y * width + width - 1] = right
-
-    for y in range(height - 1):
-        center = centers[y]
-        blocks[y * width + center] = FIRST_ROUTE_PATH
-        blocks[y * width + center + 1] = FIRST_ROUTE_PATH
-
-    for y in range(height - 1):
-        center = centers[y]
-        for x in range(1, width - 1):
-            if x in (center, center + 1):
-                continue
-            roll = _stable_index(seed, x, y, FIRST_ROUTE_GRASS, 100)
-            if roll < 42:
-                blocks[y * width + x] = FIRST_ROUTE_GRASS
-
-    spur_y = 7 + _stable_index(seed, 3, 7, FIRST_ROUTE_PATH, 4)
-    center = centers[spur_y]
-    go_right = _stable_index(seed, center, spur_y, FIRST_ROUTE_PATH, 2) == 0
-    room_right = (width - 2) - (center + 1)
-    room_left = center - 1
-    if (go_right and room_right >= 2) or room_left < 2:
-        end = min(width - 1, center + 5)
-        spur_cells = list(range(center + 2, end))
-    else:
-        start = max(1, center - 3)
-        spur_cells = list(range(start, center))
-    if len(spur_cells) < 2:
-        raise AssertionError("generated route spur did not have room to materialize")
-    for x in spur_cells:
-        blocks[spur_y * width + x] = FIRST_ROUTE_PATH
-
+    blockset = load_blockset(repo, slot.tileset)
+    entry_block = _pallet_route_entry_block(repo, slot, blockset)
+    exit_block = _semantic_exit_block(seed, slot.width)
+    semantic, topology = _generate_semantic_route(
+        slot, blockset, seed, entry_block, exit_block
+    )
+    blocks = _materialize_semantic_route(slot, blockset, semantic, seed)
+    blocks, hard_repairs = _hard_repair_native_route(
+        repo, slot, blockset, semantic, blocks, entry_block, exit_block
+    )
     generated = bytes(blocks)
+
     if generated == slot.block_bytes:
         raise AssertionError("generated geography unexpectedly matches original Route 1")
-
     same_cells = sum(a == b for a, b in zip(generated, slot.block_bytes))
     if same_cells > 70:
         raise AssertionError(
             f"generated route resembles source too closely ({same_cells}/180 cells same)"
         )
 
-    generated_map = NativeMap(
-        name=slot.name,
-        map_id=slot.map_id,
-        width=width,
-        height=height,
-        tileset=slot.tileset,
-        border_block=slot.border_block,
-        connections=slot.connections,
-        warps=[],
-        backgrounds=[],
-        objects=[],
-        block_bytes=generated,
-    )
-    blockset = load_blockset(repo, generated_map.tileset)
-    walkable = _walkable_tile_grid(generated_map, blockset)
-
-    south_start = (2 * BLOCK_TILES + 1, height * BLOCK_TILES - 1)
-    north_center = centers[0]
-    north_targets = {
-        (north_center * BLOCK_TILES + dx, 0)
-        for dx in range(BLOCK_TILES * 2)
-    }
-    if not _reachable(walkable, south_start, north_targets):
-        raise AssertionError("generated first route has no Pallet-to-north traversal")
-
     names = generate_location_names(seed)
-    sign_block_x = spur_cells[-1] if spur_cells else center
-    npc1_y = 11
-    npc2_y = 4
+    first_clearing = topology["clearings"][0]
+    sign_x, sign_y = _nearest_semantic_open(
+        semantic, first_clearing[0], first_clearing[1]
+    )
+    npc1_x, npc1_y = _nearest_semantic_open(
+        semantic, entry_block * 2 + 2, 25
+    )
+    npc2_x, npc2_y = _nearest_semantic_open(
+        semantic, exit_block * 2 + 1, 9
+    )
+
     manifest = {
         "seed": seed,
         "slot": "ROUTE_1",
+        "generator": "half_block_graph_v1",
+        "style_profile": "woodland_trail",
         "route_name": names["route"],
         "north_settlement_name": names["settlement"],
-        "dimensions": [width, height],
+        "dimensions": [slot.width, slot.height],
+        "semantic_dimensions": [SEM_W, SEM_H],
         "tileset": slot.tileset,
         "south_seam": "byte-identical to Route1 south row for PALLET_TOWN connection",
+        "entry_block": entry_block,
+        "north_exit_block": exit_block,
         "source_same_cells": same_cells,
-        "generated_cells": width * height - width,
-        "path_centers": centers[:-1],
-        "spur": {"y": spur_y, "cells": spur_cells},
+        "hard_connectivity_repairs": hard_repairs,
+        "main_nodes": topology["nodes"],
+        "branches": topology["branches"],
+        "clearings": topology["clearings"],
         "placements": {
-            "sign": [sign_block_x * 2 + 1, spur_y * 2 + 1],
-            "npc1": [centers[npc1_y] * 2 + 1, npc1_y * 2 + 1],
-            "npc2": [(centers[npc2_y] + 1) * 2, npc2_y * 2 + 1],
+            "sign": [sign_x, sign_y],
+            "npc1": [npc1_x, npc1_y],
+            "npc2": [npc2_x, npc2_y],
         },
         "generated_sha256": hashlib.sha256(generated).hexdigest(),
-        "safety": "native_blocks; south_seam_preserved; bfs_pallet_to_north",
+        "safety": "native_blocks; exact_pallet_seam; tile_bfs; hard_fallback",
     }
     return slot, generated, manifest
 
