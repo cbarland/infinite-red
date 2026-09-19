@@ -10,28 +10,28 @@ def mods():
     import torch,torch.nn as nn,torch.nn.functional as F
     return torch,nn,F
 
-def model(channels=40):
+def model(channels=16):
     torch,nn,F=mods()
     class Block(nn.Module):
         def __init__(self,c,d):
-            super().__init__(); self.net=nn.Sequential(nn.Conv2d(c,c,3,padding=d,dilation=d),nn.GroupNorm(5,c),nn.GELU(),nn.Conv2d(c,c,3,padding=d,dilation=d),nn.GroupNorm(5,c)); self.act=nn.GELU()
+            super().__init__(); self.net=nn.Sequential(nn.Conv2d(c,c,3,padding=d,dilation=d),nn.GroupNorm(4,c),nn.GELU(),nn.Conv2d(c,c,3,padding=d,dilation=d),nn.GroupNorm(4,c)); self.act=nn.GELU()
         def forward(self,x): return self.act(x+self.net(x))
     class M(nn.Module):
         def __init__(self):
-            super().__init__(); self.emb=nn.Embedding(5,channels); self.inp=nn.Conv2d(channels+4,channels,3,padding=1); self.blocks=nn.Sequential(Block(channels,1),Block(channels,2),Block(channels,4),Block(channels,2),Block(channels,1)); self.out=nn.Conv2d(channels,4,1)
+            super().__init__(); self.emb=nn.Embedding(5,channels); self.inp=nn.Conv2d(channels+4,channels,3,padding=1); self.blocks=nn.Sequential(Block(channels,1),Block(channels,2),Block(channels,4),Block(channels,2)); self.out=nn.Conv2d(channels,4,1)
         def forward(self,tokens,ratio,fmask):
             b=tokens.shape[0]; e=self.emb(tokens).permute(0,3,1,2); yy=torch.linspace(-1,1,H)[None,None,:,None].expand(b,1,H,W); xx=torch.linspace(-1,1,W)[None,None,None,:].expand(b,1,H,W); rr=ratio[:,None,None,None].expand(b,1,H,W); fm=fmask[:,None].float(); x=torch.cat([e,rr,fm,xx,yy],1); return self.out(self.blocks(self.inp(x)))
     return M()
 
-def train(sources,out,steps=2200,seed=2026):
+def train(sources,out,steps=700,seed=2026):
     torch,nn,F=mods(); random.seed(seed);np.random.seed(seed);torch.manual_seed(seed); corpus=collect(sources); data=torch.tensor(corpus.windows,dtype=torch.long); m=model(); opt=torch.optim.AdamW(m.parameters(),lr=1.5e-3,weight_decay=1e-4)
     counts=torch.bincount(data.reshape(-1),minlength=4).float(); weights=(counts.sum()/counts.clamp_min(1)).sqrt(); weights/=weights.mean()
     losses=[]; t=time.perf_counter()
     for step in range(steps):
-        idx=torch.randint(0,len(data),(24,)); target=data[idx].clone(); ratios=torch.empty(24).uniform_(0.08,1); mask=torch.rand_like(target.float())<ratios[:,None,None]; mask[:,0,0]=True; noisy=target.clone(); noisy[mask]=MASK; fixedmask=~mask
+        idx=torch.randint(0,len(data),(8,)); target=data[idx].clone(); ratios=torch.empty(8).uniform_(0.08,1); mask=torch.rand_like(target.float())<ratios[:,None,None]; mask[:,0,0]=True; noisy=target.clone(); noisy[mask]=MASK; fixedmask=~mask
         logits=m(noisy,ratios,fixedmask); lm=F.cross_entropy(logits,target,reduction="none",weight=weights); loss=lm[mask].mean(); opt.zero_grad(set_to_none=True); loss.backward(); nn.utils.clip_grad_norm_(m.parameters(),1); opt.step(); losses.append(float(loss))
         if (step+1)%250==0: print(step+1,sum(losses[-250:])/250)
-    payload={"state_dict":m.state_dict(),"channels":40,"steps":steps,"parameter_count":sum(p.numel() for p in m.parameters()),"training_seconds":time.perf_counter()-t,"final_loss":sum(losses[-100:])/100,"class_counts":counts.tolist()}; out.parent.mkdir(parents=True,exist_ok=True); torch.save(payload,out); out.with_suffix(".json").write_text(json.dumps({k:v for k,v in payload.items() if k!="state_dict"},indent=2)+"\n")
+    payload={"state_dict":m.state_dict(),"channels":16,"steps":steps,"parameter_count":sum(p.numel() for p in m.parameters()),"training_seconds":time.perf_counter()-t,"final_loss":sum(losses[-100:])/100,"class_counts":counts.tolist()}; out.parent.mkdir(parents=True,exist_ok=True); torch.save(payload,out); out.with_suffix(".json").write_text(json.dumps({k:v for k,v in payload.items() if k!="state_dict"},indent=2)+"\n")
 
 def load_sampler(path,base,corpus):
     torch,nn,F=mods(); p=torch.load(path,map_location="cpu",weights_only=False); m=model(); m.load_state_dict(p["state_dict"]);m.eval()
@@ -51,7 +51,7 @@ def load_sampler(path,base,corpus):
     return sample
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument("--base",required=True);p.add_argument("--source",action="append",default=[]);p.add_argument("--output",required=True);p.add_argument("--steps",type=int,default=2200);a=p.parse_args();sources=[("pokered",Path(a.base))]
+    p=argparse.ArgumentParser();p.add_argument("--base",required=True);p.add_argument("--source",action="append",default=[]);p.add_argument("--output",required=True);p.add_argument("--steps",type=int,default=700);a=p.parse_args();sources=[("pokered",Path(a.base))]
     for spec in a.source:name,path=spec.split("=",1);sources.append((name,Path(path)))
     train(sources,Path(a.output),a.steps);return 0
 if __name__=="__main__":raise SystemExit(main())
