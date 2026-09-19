@@ -8,7 +8,6 @@ on:
       - "tools/bakeoff/tiny_diffusion.py"
       - "tools/bakeoff/requirements.txt"
       - "tools/bakeoff/README.md"
-      - "tools/native/**"
       - ".github/workflows/generator-bakeoff.yml"
       - "config/pokered-source.toml"
   pull_request:
@@ -17,7 +16,6 @@ on:
       - "tools/bakeoff/tiny_diffusion.py"
       - "tools/bakeoff/requirements.txt"
       - "tools/bakeoff/README.md"
-      - "tools/native/**"
       - ".github/workflows/generator-bakeoff.yml"
       - "config/pokered-source.toml"
 
