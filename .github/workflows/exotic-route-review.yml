@@ -1,1 +1,50 @@
-name: exotic-route-review\n\non:\n  push:\n    paths:\n      - "tools/bakeoff/exotic_routes.py"\n      - ".github/workflows/exotic-route-review.yml"\n      - "tools/native/pokered_native.py"\n      - "config/pokered-source.toml"\n\npermissions:\n  contents: read\n\njobs:\n  generate:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Checkout Infinite Red\n        uses: actions/checkout@v4\n\n      - name: Checkout pinned pokered\n        shell: bash\n        run: |\n          set -euo pipefail\n          PIN="$(python - <<'PY'\n          import tomllib\n          with open("config/pokered-source.toml", "rb") as f:\n              print(tomllib.load(f)["commit"])\n          PY\n          )"\n          git clone --filter=blob:none --no-checkout https://github.com/pret/pokered.git "$RUNNER_TEMP/pokered"\n          git -C "$RUNNER_TEMP/pokered" fetch --depth 1 origin "$PIN"\n          git -C "$RUNNER_TEMP/pokered" checkout --detach "$PIN"\n\n      - name: Install rendering dependencies\n        run: python -m pip install -r tools/native/requirements.txt\n\n      - name: Generate exotic review suite\n        env:\n          PYTHONPATH: tools/native\n        run: |\n          python tools/bakeoff/exotic_routes.py \\n            --repo "$RUNNER_TEMP/pokered" \\n            --output "$RUNNER_TEMP/exotic-routes"\n          cat "$RUNNER_TEMP/exotic-routes/results.json"\n\n      - name: Upload review suite\n        uses: actions/upload-artifact@v4\n        with:\n          name: exotic-route-review\n          path: ${{ runner.temp }}/exotic-routes/\n          if-no-files-found: error\n
+name: exotic-route-review
+
+on:
+  push:
+    paths:
+      - "tools/bakeoff/exotic_routes.py"
+      - ".github/workflows/exotic-route-review.yml"
+      - "tools/native/pokered_native.py"
+      - "config/pokered-source.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Infinite Red
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned pokered
+        shell: bash
+        run: |
+          set -euo pipefail
+          PIN="$(python - <<'PY'
+          import tomllib
+          with open("config/pokered-source.toml", "rb") as f:
+              print(tomllib.load(f)["commit"])
+          PY
+          )"
+          git clone --filter=blob:none --no-checkout https://github.com/pret/pokered.git "$RUNNER_TEMP/pokered"
+          git -C "$RUNNER_TEMP/pokered" fetch --depth 1 origin "$PIN"
+          git -C "$RUNNER_TEMP/pokered" checkout --detach "$PIN"
+
+      - name: Install rendering dependencies
+        run: python -m pip install -r tools/native/requirements.txt
+
+      - name: Generate exotic review suite
+        env:
+          PYTHONPATH: tools/native
+        run: |
+          python tools/bakeoff/exotic_routes.py             --repo "$RUNNER_TEMP/pokered"             --output "$RUNNER_TEMP/exotic-routes"
+          cat "$RUNNER_TEMP/exotic-routes/results.json"
+
+      - name: Upload review suite
+        uses: actions/upload-artifact@v4
+        with:
+          name: exotic-route-review
+          path: ${{ runner.temp }}/exotic-routes/
+          if-no-files-found: error
