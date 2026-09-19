@@ -1,0 +1,7 @@
+# Pinned upstream decomp used by the native data adapter.
+repository = "https://github.com/pret/pokered"
+commit = "a1a22aaf84d1675bcdbaeb194592379d586d838e"
+default_branch = "master"
+
+# Infinite Red should consume/emit native pokered data at this revision.
+strategy = "data-first"
