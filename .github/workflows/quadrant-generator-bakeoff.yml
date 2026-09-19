@@ -6,14 +6,12 @@ on:
     paths:
       - "tools/bakeoff/quadrant_*"
       - "tools/bakeoff/bakeoff.py"
-      - "tools/native/**"
       - "config/training-corpus.toml"
       - ".github/workflows/quadrant-generator-bakeoff.yml"
   pull_request:
     paths:
       - "tools/bakeoff/quadrant_*"
       - "tools/bakeoff/bakeoff.py"
-      - "tools/native/**"
       - "config/training-corpus.toml"
       - ".github/workflows/quadrant-generator-bakeoff.yml"
 
