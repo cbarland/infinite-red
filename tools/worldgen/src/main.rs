@@ -46,12 +46,17 @@ fn run() -> Result<(), String> {
             let path = value(&args, "--state")?;
             let from = value(&args, "--area")?;
             let exit = value(&args, "--exit")?;
+            let rom_usage_ratio = optional_value(&args, "--rom-usage")
+                .unwrap_or("0")
+                .parse::<f32>()
+                .map_err(|e| format!("invalid --rom-usage: {e}"))?;
             let mut state = read_state(path)?;
             let id = expand(
                 &mut state,
                 ExpansionRequest {
                     from_area: from.to_string(),
                     exit_id: exit.to_string(),
+                    rom_usage_ratio,
                 },
             )?;
             write_state(path, &state)?;
@@ -89,6 +94,11 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn optional_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    let i = args.iter().position(|v| v == flag)?;
+    args.get(i + 1).map(String::as_str)
+}
+
 fn value<'a>(args: &'a [String], flag: &str) -> Result<&'a str, String> {
     let i = args
         .iter()
@@ -116,5 +126,5 @@ fn write_state(path: &str, state: &WorldState) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: worldgen <bootstrap|choose-starter|defeat-rival|expand|travel|validate|show> ...".into()
+    "usage: worldgen <bootstrap|choose-starter|defeat-rival|expand|travel|validate|show> ...; expand accepts optional --rom-usage 0..1".into()
 }
