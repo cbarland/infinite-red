@@ -10,15 +10,6 @@ on:
       - "tools/bakeoff/README.md"
       - ".github/workflows/generator-bakeoff.yml"
       - "config/pokered-source.toml"
-  pull_request:
-    paths:
-      - "tools/bakeoff/bakeoff.py"
-      - "tools/bakeoff/tiny_diffusion.py"
-      - "tools/bakeoff/requirements.txt"
-      - "tools/bakeoff/README.md"
-      - ".github/workflows/generator-bakeoff.yml"
-      - "config/pokered-source.toml"
-
 permissions:
   contents: read
 
