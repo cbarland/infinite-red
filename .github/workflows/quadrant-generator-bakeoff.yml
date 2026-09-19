@@ -79,7 +79,7 @@ jobs:
         env:
           PYTHONPATH: tools/native:tools/bakeoff
         run: |
-          python tools/bakeoff/quadrant_diffusion.py             --base "$RUNNER_TEMP/corpus/pokered"             --source star_beasts_comet="$RUNNER_TEMP/corpus/star_beasts_comet"             --source pokemon_yume="$RUNNER_TEMP/corpus/pokemon_yume"             --source pokemon_amaranth="$RUNNER_TEMP/corpus/pokemon_amaranth"             --output "$RUNNER_TEMP/quadrant-route.pt"             --steps 2200
+          python tools/bakeoff/quadrant_diffusion.py             --base "$RUNNER_TEMP/corpus/pokered"             --source star_beasts_comet="$RUNNER_TEMP/corpus/star_beasts_comet"             --source pokemon_yume="$RUNNER_TEMP/corpus/pokemon_yume"             --source pokemon_amaranth="$RUNNER_TEMP/corpus/pokemon_amaranth"             --output "$RUNNER_TEMP/quadrant-route.pt"             --steps 700
 
       - name: Run full half-block bake-off
         env:
