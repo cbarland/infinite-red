@@ -21,7 +21,10 @@ The shortest path to the actual product is:
 2. **Generated first route**
    - use the `ROUTE_1` slot only as a compatibility container;
    - preserve only the physical seam into Pallet Town;
-   - generate the remaining topology from native Overworld blocks;
+   - generate macro-topology with the graph grammar and deterministic constraints;
+   - generate several valid candidates, with Jev available to score/rerank them;
+   - use a Jev-selected persistent style profile to materialize coherent native Overworld block families;
+   - keep tiny diffusion as an optional terrain-infill experiment rather than the critical path;
    - generate its player-facing name and the identity of its next settlement;
    - generate/reposition signs and NPCs without leaking Kanto slot names;
    - validate connectivity and stock-engine buildability.

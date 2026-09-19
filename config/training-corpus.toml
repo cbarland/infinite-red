@@ -1,0 +1,36 @@
+# Experimental external map corpus for route-layout learning.
+# Repositories are cloned at pinned commits in CI; their assets are not vendored.
+# Experimental checkpoints trained with third-party sources are research-only
+# until provenance/licensing is reviewed for distribution.
+
+[[source]]
+name = "pokered"
+repository = "https://github.com/pret/pokered.git"
+commit = "a1a22aaf84d1675bcdbaeb194592379d586d838e"
+branch = "master"
+role = "base_runtime"
+distribution = "reference"
+
+[[source]]
+name = "star_beasts_comet"
+repository = "https://github.com/StarBeasts/Star-Beasts-Comet.git"
+commit = "a05a3ec241ba9d8030a897ae4f8ff996782bb5f3"
+branch = "master"
+role = "custom_region_layout_corpus"
+distribution = "research_only"
+
+[[source]]
+name = "pokemon_yume"
+repository = "https://github.com/PokefanMarcel/yumepokered.git"
+commit = "03fe294ef67d40db8baece9d8ad95216e05c5546"
+branch = "master"
+role = "expanded_route_layout_corpus"
+distribution = "research_only"
+
+[[source]]
+name = "pokemon_amaranth"
+repository = "https://github.com/melthelesbian/poke-amaranth.git"
+commit = "0b72c0d5c2c54de04abdf019910c5ce413f6eb9b"
+branch = "develop"
+role = "redesigned_route_layout_corpus"
+distribution = "research_only"

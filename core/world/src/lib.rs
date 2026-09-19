@@ -46,6 +46,8 @@ pub struct Area {
     pub kind: AreaKind,
     pub challenge: f32,
     pub came_from: Option<String>,
+    #[serde(default)]
+    pub style_profile: Option<String>,
     pub exits: Vec<Exit>,
     pub npcs: Vec<Npc>,
     pub notes: Vec<String>,
@@ -166,6 +168,7 @@ pub fn bootstrap(seed: u64) -> WorldState {
             kind: AreaKind::Interior,
             challenge: 1.0,
             came_from: None,
+            style_profile: None,
             exits: vec![Exit {
                 id: "south_door".into(),
                 label: "South Door".into(),
@@ -349,12 +352,19 @@ pub fn expand(state: &mut WorldState, req: ExpansionRequest) -> Result<String, S
         });
     }
 
+    let style_profile = match &kind {
+        AreaKind::Route => Some("woodland_trail".to_string()),
+        AreaKind::Settlement => Some("open_meadow".to_string()),
+        _ => None,
+    };
+
     let area = Area {
         id: new_id.clone(),
         name: name.clone(),
         kind,
         challenge,
         came_from: Some(from.id.clone()),
+        style_profile,
         exits,
         npcs: vec![
             Npc {

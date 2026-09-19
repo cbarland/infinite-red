@@ -1,0 +1,85 @@
+name: generator-bakeoff
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/bakeoff/bakeoff.py"
+      - "tools/bakeoff/tiny_diffusion.py"
+      - "tools/bakeoff/requirements.txt"
+      - "tools/bakeoff/README.md"
+      - ".github/workflows/generator-bakeoff.yml"
+      - "config/pokered-source.toml"
+permissions:
+  contents: read
+
+jobs:
+  bakeoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout Infinite Red
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned pokered
+        shell: bash
+        run: |
+          set -euo pipefail
+          PIN="$(python - <<'PY'
+          import tomllib
+          with open("config/pokered-source.toml", "rb") as f:
+              print(tomllib.load(f)["commit"])
+          PY
+          )"
+          git clone --filter=blob:none --no-checkout https://github.com/pret/pokered.git "$RUNNER_TEMP/pokered"
+          git -C "$RUNNER_TEMP/pokered" fetch --depth 1 origin "$PIN"
+          git -C "$RUNNER_TEMP/pokered" checkout --detach "$PIN"
+          test "$(git -C "$RUNNER_TEMP/pokered" rev-parse HEAD)" = "$PIN"
+
+      - name: Install lightweight bake-off dependencies
+        run: python -m pip install -r tools/bakeoff/requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m py_compile             tools/native/pokered_native.py             tools/bakeoff/bakeoff.py             tools/bakeoff/tiny_diffusion.py
+
+      - name: Run graph and WFC baselines
+        env:
+          PYTHONPATH: tools/native:tools/bakeoff
+        run: |
+          python tools/bakeoff/bakeoff.py             --repo "$RUNNER_TEMP/pokered"             --output "$RUNNER_TEMP/baseline"             --seeds 41,42,43,44
+
+      - name: Install CPU PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python - <<'PY'
+          import torch
+          print("torch", torch.__version__)
+          PY
+
+      - name: Train tiny masked denoiser
+        env:
+          PYTHONPATH: tools/native:tools/bakeoff
+        run: |
+          python tools/bakeoff/tiny_diffusion.py             --repo "$RUNNER_TEMP/pokered"             --output "$RUNNER_TEMP/tiny-route.pt"             --steps 700             --channels 48             --depth 4             --batch-size 16             --seed 2026
+
+      - name: Run full bake-off
+        env:
+          PYTHONPATH: tools/native:tools/bakeoff
+        run: |
+          python tools/bakeoff/bakeoff.py             --repo "$RUNNER_TEMP/pokered"             --output "$RUNNER_TEMP/bakeoff"             --seeds 41,42,43,44,45,46,47,48             --diffusion-checkpoint "$RUNNER_TEMP/tiny-route.pt"
+          cat "$RUNNER_TEMP/bakeoff/report.md"
+          cat "$RUNNER_TEMP/tiny-route.json"
+
+      - name: Collect model metadata
+        run: |
+          cp "$RUNNER_TEMP/tiny-route.json" "$RUNNER_TEMP/bakeoff/tiny-route.json"
+          cp "$RUNNER_TEMP/tiny-route.pt" "$RUNNER_TEMP/bakeoff/tiny-route.pt"
+
+      - name: Upload bake-off artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-generator-bakeoff
+          path: ${{ runner.temp }}/bakeoff/
+          if-no-files-found: error
