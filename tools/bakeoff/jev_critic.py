@@ -20,10 +20,7 @@ SYMBOLS = {0: "#", 1: "+", 2: ".", 3: '"'}
 STYLE_PROFILES = {
     "woodland_trail": "Tree/brush boundaries, irregular grass pockets, narrow natural clearings, moderate visual enclosure.",
     "open_meadow": "Broad grass/open-ground fields, sparse barriers, gentle path rhythm, occasional isolated landmarks.",
-    "rocky_pass": "More mixed/solid terrain masses, chokepoints, ledge-like rhythm, smaller grass pockets.",
-    "riverside_path": "Long directional terrain bands and open banks, asymmetric edges, occasional constrained crossings.",
     "scrub_route": "Patchy mixed terrain and grass, broken sightlines, irregular small clearings, less formal path geometry.",
-    "settlement_approach": "Increasingly ordered path structure near destination, open gathering space, clear landmark framing.",
 }
 
 def ascii_grid(grid: np.ndarray) -> str:
