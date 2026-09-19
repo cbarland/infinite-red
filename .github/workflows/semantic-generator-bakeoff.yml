@@ -6,14 +6,12 @@ on:
     paths:
       - "tools/bakeoff/semantic_*"
       - "tools/bakeoff/bakeoff.py"
-      - "tools/native/**"
       - "config/training-corpus.toml"
       - ".github/workflows/semantic-generator-bakeoff.yml"
   pull_request:
     paths:
       - "tools/bakeoff/semantic_*"
       - "tools/bakeoff/bakeoff.py"
-      - "tools/native/**"
       - "config/training-corpus.toml"
       - ".github/workflows/semantic-generator-bakeoff.yml"
 
