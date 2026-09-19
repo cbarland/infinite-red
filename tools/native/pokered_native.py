@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import heapq
 import json
+import random
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -36,6 +38,18 @@ FIRST_ROUTE_PATH = 0x31
 FIRST_ROUTE_GRASS = 0x0B
 FIRST_ROUTE_LEFT_EDGE = (0x4E, 0x6D)
 FIRST_ROUTE_RIGHT_EDGE = (0x4D, 0x6E)
+
+SEM_SOLID = 0
+SEM_MIXED = 1
+SEM_OPEN = 2
+SEM_GRASS = 3
+SEM_W = 20
+SEM_H = 36
+
+WOODLAND_ROUTE_BLOCKS = (
+    0x0A, 0x0B, 0x1C, 0x31, 0x4D, 0x4E, 0x4F, 0x50,
+    0x51, 0x52, 0x62, 0x63, 0x6D, 0x6E, 0x6F, 0x74,
+)
 
 NAME_PREFIXES = (
     "CEDAR", "AMBER", "MIST", "WILLOW", "FERN", "PINE", "SILVER", "MOSS",
