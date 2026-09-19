@@ -25,6 +25,7 @@
         "kind": { "enum": ["interior", "settlement", "route", "dungeon"] },
         "challenge": { "type": "number", "minimum": 1 },
         "came_from": { "type": ["string", "null"] },
+        "style_profile": { "type": ["string", "null"] },
         "exits": { "type": "array" },
         "npcs": { "type": "array" },
         "notes": { "type": "array", "items": { "type": "string" } }
