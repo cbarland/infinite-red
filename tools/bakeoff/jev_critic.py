@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 
 DIRECTOR_DIR = Path(__file__).resolve().parents[1] / "director"
 if str(DIRECTOR_DIR) not in sys.path:
@@ -28,7 +27,7 @@ STYLE_PROFILES = {
     "scrub_route": "Patchy mixed terrain and grass, broken sightlines, irregular small clearings, less formal path geometry.",
 }
 
-def ascii_grid(grid: np.ndarray) -> str:
+def ascii_grid(grid) -> str:
     return "\n".join("".join(SYMBOLS[int(v)] for v in row) for row in grid)
 
 def candidate_state(candidate: dict[str, Any]) -> str:
@@ -143,6 +142,8 @@ def extract_answer(response: dict[str, Any], key: str) -> Any:
     return value
 
 def label_directory(input_dir: Path, output: Path, previous_style: str | None) -> None:
+    import numpy as np
+
     rows = []
     for path in sorted(input_dir.glob("*.semantic.npy")):
         grid = np.load(path)
