@@ -12,6 +12,7 @@ from pokered_native import (
     expand_blocks,
     load_blockset,
     load_map,
+    generate_route1_variant,
     write_roundtrip,
 )
 
@@ -48,6 +49,29 @@ class NativePalletTests(unittest.TestCase):
                 (self.repo / "maps" / "PalletTown.blk").read_bytes(),
             )
             self.assertTrue(manifest_path.exists())
+
+    def test_route1_variant_is_native_and_collision_equivalent(self) -> None:
+        route, generated, manifest = generate_route1_variant(self.repo, 42)
+        self.assertEqual(len(generated), route.width * route.height)
+        self.assertNotEqual(generated, route.block_bytes)
+        self.assertGreater(manifest["changed_blocks"], 0)
+
+        width = route.width
+        height = route.height
+        for x in range(width):
+            self.assertEqual(generated[x], route.block_bytes[x])
+            bottom = (height - 1) * width + x
+            self.assertEqual(generated[bottom], route.block_bytes[bottom])
+        for y in range(height):
+            left = y * width
+            right = left + width - 1
+            self.assertEqual(generated[left], route.block_bytes[left])
+            self.assertEqual(generated[right], route.block_bytes[right])
+
+    def test_route1_variant_is_deterministic(self) -> None:
+        _, first, _ = generate_route1_variant(self.repo, 42)
+        _, second, _ = generate_route1_variant(self.repo, 42)
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":
