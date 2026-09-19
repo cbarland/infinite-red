@@ -41,6 +41,7 @@ The Director receives compact world state:
 - inventory / HM / key-item milestones
 - unresolved setups and payoffs
 - recent story and encounter history
+- linker-measured ROM occupancy and remaining allocatable space
 
 It proposes semantic content such as:
 
@@ -53,6 +54,8 @@ It proposes semantic content such as:
 - landmarks and traversal constraints
 
 The Director should not select raw tile pixels. It may choose from known game-native concepts and templates.
+
+The decision stack is intentionally model-tiered: deterministic progression policy first, Jev for the majority of high-frequency typed choices, and local Needle 3 for structured storyline beats. See `docs/decision-stack.md`.
 
 ### 2. Native data materializer — deterministic
 
@@ -124,4 +127,6 @@ No additional gameplay systems should be implemented in Godot unless they are sp
 5. Generate a new route/town as a native block grid and compile it into `pokered`.
 6. Connect that generated map to an existing map using native connection data.
 7. Add native trainers, encounters, signs and scripts.
-8. Profile the existing map-loading path and choose the smallest dynamic-content seam.
+8. Feed linker-measured ROM occupancy into progression and generation policy.
+9. Use Jev as the primary batched semantic decision layer and Needle 3 as the local structured story planner.
+10. Profile the existing map-loading path and choose the smallest dynamic-content seam.
