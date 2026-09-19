@@ -4,13 +4,19 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "tools/bakeoff/**"
+      - "tools/bakeoff/bakeoff.py"
+      - "tools/bakeoff/tiny_diffusion.py"
+      - "tools/bakeoff/requirements.txt"
+      - "tools/bakeoff/README.md"
       - "tools/native/**"
       - ".github/workflows/generator-bakeoff.yml"
       - "config/pokered-source.toml"
   pull_request:
     paths:
-      - "tools/bakeoff/**"
+      - "tools/bakeoff/bakeoff.py"
+      - "tools/bakeoff/tiny_diffusion.py"
+      - "tools/bakeoff/requirements.txt"
+      - "tools/bakeoff/README.md"
       - "tools/native/**"
       - ".github/workflows/generator-bakeoff.yml"
       - "config/pokered-source.toml"
