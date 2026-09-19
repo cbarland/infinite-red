@@ -108,6 +108,21 @@ Every generated map should pass structural checks before compilation:
 
 Then the normal `pokered` build is the final validator.
 
+## ROM budget feedback
+
+The build/materializer must report usable ROM occupancy back to the Director. Prefer linker section placement from the RGBDS map output over raw ROM file length. RGBDS map files enumerate section placement, which lets us account for bank-local free regions and reserve headroom for the dynamic seam and finale content.
+
+The world progression policy accepts `rom_usage_ratio` explicitly. As capacity fills, generation should:
+
+- raise the minimum challenge floor;
+- reduce the number of new frontiers;
+- stop creating new story promises;
+- prioritize resolution of outstanding promises;
+- concentrate badges/items/bosses and other milestones;
+- enter a forced-finale mode before allocatable space is exhausted.
+
+The policy should retain a nonzero safety reserve so a generated world cannot consume the final bytes needed to close itself coherently.
+
 ## Runtime extension policy
 
 Do not patch the engine simply because generation is easier elsewhere.
