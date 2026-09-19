@@ -684,6 +684,11 @@ def _cmd_render(args: argparse.Namespace) -> None:
     print(args.output)
 
 
+def _cmd_generate_first_geography(args: argparse.Namespace) -> None:
+    manifest = write_first_geography(Path(args.repo), args.seed, Path(args.output))
+    print(json.dumps(manifest, indent=2))
+
+
 def _cmd_generate_route1(args: argparse.Namespace) -> None:
     repo = Path(args.repo)
     output = Path(args.output)
@@ -760,6 +765,15 @@ def build_parser() -> argparse.ArgumentParser:
     route1.add_argument("--seed", type=int, default=42)
     route1.add_argument("--scale", type=int, default=2)
     route1.set_defaults(func=_cmd_generate_route1)
+
+    geography = sub.add_parser(
+        "generate-first-geography",
+        help="construct first post-Pallet geography and player-facing names",
+    )
+    geography.add_argument("--repo", required=True)
+    geography.add_argument("--output", required=True)
+    geography.add_argument("--seed", type=int, default=42)
+    geography.set_defaults(func=_cmd_generate_first_geography)
 
     return parser
 
