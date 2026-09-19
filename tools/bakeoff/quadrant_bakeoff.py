@@ -341,6 +341,62 @@ def style_candidates(base: Path, profile: str):
     return result
 
 
+def hard_carve_native_path(base: Path, blocks: np.ndarray, sem: np.ndarray, seed: int):
+    """Last-resort tile-safe path using fully walkable native ground blocks."""
+    if tile_connectivity(base, blocks, seed):
+        return blocks, 0
+
+    start = (2, BLOCK_H - 1)
+    target_x = choose_north_exit(seed)
+    targets = {(target_x, 0), (target_x + 1, 0)}
+    dist = {start: 0.0}
+    prev = {}
+    heap = [(0.0, start)]
+    target = None
+    while heap:
+        cost, pos = heapq.heappop(heap)
+        if cost != dist[pos]:
+            continue
+        if pos in targets:
+            target = pos
+            break
+        x, y = pos
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if not (0 <= nx < BLOCK_W and 0 <= ny < BLOCK_H):
+                continue
+            quad = sem[ny * 2 : ny * 2 + 2, nx * 2 : nx * 2 + 2]
+            openish = float(np.mean(np.isin(quad, (OPEN, GRASS))))
+            step = 1.0 - 0.8 * openish
+            nd = cost + step
+            if nd < dist.get((nx, ny), 1e9):
+                dist[(nx, ny)] = nd
+                prev[(nx, ny)] = pos
+                heapq.heappush(heap, (nd, (nx, ny)))
+
+    if target is None:
+        raise AssertionError("could not derive final native connectivity path")
+
+    path = []
+    cur = target
+    while cur != start:
+        path.append(cur)
+        cur = prev[cur]
+    path.append(start)
+    path.reverse()
+
+    out = blocks.copy()
+    changes = 0
+    for x, y in path:
+        if y == BLOCK_H - 1:
+            continue
+        if int(out[y, x]) != 0x31:
+            out[y, x] = 0x31
+            changes += 1
+
+    if not tile_connectivity(base, out, seed):
+        raise AssertionError("hard native path still failed tile connectivity")
+    return out, changes
+
 def materialize(base: Path, sem: np.ndarray, seed: int, profile: str):
     candidates=style_candidates(base,profile)
     blocks=np.zeros((BLOCK_H,BLOCK_W),dtype=np.int64)
@@ -362,7 +418,8 @@ def materialize(base: Path, sem: np.ndarray, seed: int, profile: str):
     route=load_map(base,"Route1")
     blocks[-1,:]=np.frombuffer(route.block_bytes[-BLOCK_W:],dtype=np.uint8)
     native,repairs,_=__import__("bakeoff").repair_connectivity(base,blocks,seed)
-    return native,repairs
+    native,hard_repairs=hard_carve_native_path(base,native,sem,seed)
+    return native,repairs+hard_repairs
 
 
 def render_native(base: Path, blocks: np.ndarray, path: Path):
