@@ -521,14 +521,13 @@ def generate_first_route(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]
 
 
 def _replace_name_label(text: str, label: str, value: str) -> str:
-    pattern = re.compile(
-        rf'^{re.escape(label)}:\\s+db\\s+"[^"]*@"$', re.MULTILINE
-    )
-    replacement = f'{label}: db "{value}@"'
-    updated, count = pattern.subn(replacement, text)
-    if count != 1:
-        raise ValueError(f"expected one {label} entry, replaced {count}")
-    return updated
+    lines = text.splitlines()
+    matches = [i for i, line in enumerate(lines) if line.startswith(f"{label}:")]
+    if len(matches) != 1:
+        raise ValueError(f"expected one {label} entry, found {len(matches)}")
+    lines[matches[0]] = f'{label}: db "{value}@"'
+    ending = "\n" if text.endswith("\n") else ""
+    return "\n".join(lines) + ending
 
 
 def _generated_route_objects(manifest: dict) -> str:
