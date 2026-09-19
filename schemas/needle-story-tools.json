@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "purpose": "Needle 3 structured story planning for Infinite Red. These are planning calls, not direct ROM mutations.",
+  "tools": [
+    {
+      "name": "establish_setup",
+      "description": "Create a new story setup only when progression policy permits a new promise.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "thread_kind": {
+            "type": "string",
+            "enum": [
+              "rival",
+              "mystery",
+              "npc_need",
+              "blocked_path",
+              "faction",
+              "legend",
+              "local_problem"
+            ]
+          },
+          "npc_role": {
+            "type": "string",
+            "enum": [
+              "mentor",
+              "rival",
+              "trainer",
+              "guide",
+              "researcher",
+              "caretaker",
+              "merchant",
+              "wanderer",
+              "authority",
+              "villain"
+            ]
+          },
+          "mechanic": {
+            "type": "string",
+            "enum": [
+              "none",
+              "battle",
+              "badge",
+              "hm",
+              "key_item",
+              "npc",
+              "location",
+              "story_flag"
+            ]
+          },
+          "payoff_hint": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "dialogue_intent": {
+            "type": "string",
+            "enum": [
+              "rumor",
+              "warning",
+              "challenge",
+              "request",
+              "clue",
+              "foreshadow"
+            ]
+          }
+        },
+        "required": [
+          "thread_kind",
+          "npc_role",
+          "mechanic",
+          "payoff_hint",
+          "dialogue_intent"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "advance_thread",
+      "description": "Advance an existing unresolved story thread without resolving it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "promise_id": {
+            "type": "string"
+          },
+          "beat_kind": {
+            "type": "string",
+            "enum": [
+              "escalation",
+              "reveal",
+              "complication",
+              "callback",
+              "recontextualization"
+            ]
+          },
+          "npc_role": {
+            "type": "string"
+          },
+          "mechanic": {
+            "type": "string",
+            "enum": [
+              "none",
+              "battle",
+              "badge",
+              "hm",
+              "key_item",
+              "npc",
+              "location",
+              "story_flag"
+            ]
+          },
+          "dialogue_intent": {
+            "type": "string",
+            "enum": [
+              "rumor",
+              "warning",
+              "challenge",
+              "gratitude",
+              "clue",
+              "reveal"
+            ]
+          }
+        },
+        "required": [
+          "promise_id",
+          "beat_kind",
+          "npc_role",
+          "mechanic",
+          "dialogue_intent"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "resolve_promise",
+      "description": "Pay off an existing unresolved promise. Prefer this as closure pressure rises.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "promise_id": {
+            "type": "string"
+          },
+          "resolution_kind": {
+            "type": "string",
+            "enum": [
+              "battle",
+              "badge",
+              "hm",
+              "key_item",
+              "npc",
+              "location",
+              "story_flag",
+              "reconnection"
+            ]
+          },
+          "npc_role": {
+            "type": "string"
+          },
+          "consequence": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "dialogue_intent": {
+            "type": "string",
+            "enum": [
+              "reveal",
+              "gratitude",
+              "challenge",
+              "farewell",
+              "confirmation"
+            ]
+          }
+        },
+        "required": [
+          "promise_id",
+          "resolution_kind",
+          "npc_role",
+          "consequence",
+          "dialogue_intent"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stage_finale",
+      "description": "Create an endgame/finale beat when progression policy requires finalization.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "callback_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8
+          },
+          "climax_mechanic": {
+            "type": "string",
+            "enum": [
+              "rival_battle",
+              "boss_battle",
+              "elite_sequence",
+              "legend_event",
+              "multi_stage_story"
+            ]
+          },
+          "closure_summary": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "postgame_hook": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "callback_ids",
+          "climax_mechanic",
+          "closure_summary",
+          "postgame_hook"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
