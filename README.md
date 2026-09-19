@@ -21,10 +21,10 @@ The earlier Godot vertical remains in the repository as a planner/world-state pr
 - `docs/decision-stack.md` — ROM-pressure + Jev + Needle generation policy
 - `runtime/godot/` — prototype harness only
 
-The next proof is **Pallet Town round trip**: reconstruct it directly from the decomp's 10×9 block grid, Overworld blockset/tileset, header, connections and object data, then emit/build an equivalent native map through the normal `pokered` toolchain.
+The native-data proof is now working: Pallet Town round-trips byte-for-byte from the pinned decomp, and a deterministic Route 1 variant can be generated from native Overworld blocks while preserving its exact collision/grass topology. CI drops that generated `.blk` into an otherwise stock `pret/pokered` checkout and requires RGBDS 1.0.3 to build Pokémon Red successfully.
 
 Only after native offline generation is proven will we modify the game framework at all. The eventual dynamic-content loader should be the smallest possible seam around existing data lookup, while generated content itself remains ordinary Red data.
 
 ROM occupancy is now an explicit progression input. As allocatable ROM space fills, the Director should converge: raise the difficulty floor, stop opening new story threads, resolve outstanding promises, narrow branching, and force a coherent finale before capacity is exhausted. Jev is the intended high-frequency structured decision layer; Needle 3 is the optional on-device structured story planner.
 
-See `docs/architecture.md` and `docs/native-data-pipeline.md`.
+See `docs/architecture.md`, `docs/native-data-pipeline.md`, and `docs/roadmap.md`.
