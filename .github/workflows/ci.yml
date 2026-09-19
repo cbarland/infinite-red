@@ -36,6 +36,8 @@ jobs:
             tools/director/needle_story.py \
             tools/bakeoff/jev_critic.py \
             tools/bakeoff/select_jev_finetune.py
+          python tools/bakeoff/jev_critic.py --help > /dev/null
+          python tools/bakeoff/select_jev_finetune.py --help > /dev/null
 
       - name: Smoke test first vertical
         shell: bash
