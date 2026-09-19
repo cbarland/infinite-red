@@ -38,6 +38,57 @@ GRASS = 3
 MASK = 4
 CLASS_NAMES = {SOLID: "solid", MIXED: "mixed", OPEN: "open", GRASS: "grass"}
 
+# Native Red style profiles constrain materialization to visually coherent block
+# families. Jev may select the profile, but it never selects arbitrary cells.
+STYLE_PROFILES = {
+    "woodland_trail": {
+        "open": (0x31, 0x0A),
+        "grass": (0x0B,),
+        "left_edge": (0x4D, 0x6E),
+        "right_edge": (0x4E, 0x6D),
+        "top_edge": (0x52, 0x6F),
+        "bottom_edge": (0x51,),
+        "corner_ul": (0x4F,),
+        "corner_ur": (0x50,),
+        "corner_lr": (0x62,),
+        "corner_ll": (0x63,),
+        "interior": (0x1C, 0x6F),
+    },
+    "open_meadow": {
+        "open": (0x0A, 0x31, 0x74),
+        "grass": (0x0B,),
+        "left_edge": (0x4D,),
+        "right_edge": (0x4E,),
+        "top_edge": (0x52,),
+        "bottom_edge": (0x51,),
+        "corner_ul": (0x4F,),
+        "corner_ur": (0x50,),
+        "corner_lr": (0x62,),
+        "corner_ll": (0x63,),
+        "interior": (0x1C,),
+    },
+    "scrub_route": {
+        "open": (0x31, 0x0A),
+        "grass": (0x0B,),
+        "left_edge": (0x4D,),
+        "right_edge": (0x4E,),
+        "top_edge": (0x6F, 0x52),
+        "bottom_edge": (0x51,),
+        "corner_ul": (0x4F,),
+        "corner_ur": (0x50,),
+        "corner_lr": (0x62,),
+        "corner_ll": (0x63,),
+        "interior": (0x1C, 0x6F),
+    },
+}
+
+SAFE_ROUTE_BLOCKS = {
+    block
+    for profile in STYLE_PROFILES.values()
+    for values in profile.values()
+    for block in values
+}
+
 
 @dataclass
 class SemanticCorpus:
@@ -310,35 +361,72 @@ def semantic_wfc(corpus: SemanticCorpus, seed: int, retries=20):
     g=semantic_graph(seed); apply_semantic_fixed(g,seed); return g
 
 
-def base_materializer(base_repo: Path, semantic: np.ndarray, seed: int):
-    # Candidate block IDs are learned from base pokered route usage and bucketed
-    # by the same semantic classifier.
-    walkable, grass, blockset = overworld_semantics(base_repo)
-    used=set()
-    raw_maps=[]
-    for _,name,_ in route_semantic_maps(base_repo,"base"):
-        try:
-            m=load_map(base_repo,name)
-        except Exception:
-            continue
-        arr=np.frombuffer(m.block_bytes,dtype=np.uint8).reshape(m.height,m.width)
-        raw_maps.append(arr)
-        used.update(int(v) for v in arr.reshape(-1))
-    buckets=defaultdict(list)
-    for bid in sorted(used):
-        buckets[block_class(blockset,walkable,grass,bid)].append(bid)
-    defaults={SOLID:0x4F,MIXED:0x1C,OPEN:0x31,GRASS:0x0B}
-    rng=random.Random(seed)
-    out=np.zeros((TARGET_H,TARGET_W),dtype=np.int64)
+def _pick(values: tuple[int, ...], seed: int, x: int, y: int) -> int:
+    if len(values) == 1:
+        return values[0]
+    return values[(seed * 31 + x * 7 + y * 13) % len(values)]
+
+
+def _openish(value: int) -> bool:
+    return value in (OPEN, GRASS)
+
+
+def base_materializer(
+    base_repo: Path,
+    semantic: np.ndarray,
+    seed: int,
+    style_profile: str = "woodland_trail",
+):
+    """Materialize semantic terrain using one coherent native Red style family."""
+    profile = STYLE_PROFILES[style_profile]
+    out = np.zeros((TARGET_H, TARGET_W), dtype=np.int64)
+
     for y in range(TARGET_H):
         for x in range(TARGET_W):
-            cls=int(semantic[y,x])
-            vals=buckets.get(cls) or [defaults[cls]]
-            out[y,x]=vals[(seed*31+x*7+y*13+rng.randrange(len(vals)))%len(vals)]
+            cls = int(semantic[y, x])
+            if cls == OPEN:
+                out[y, x] = _pick(profile["open"], seed, x, y)
+                continue
+            if cls == GRASS:
+                out[y, x] = _pick(profile["grass"], seed, x, y)
+                continue
+
+            up = y > 0 and _openish(int(semantic[y - 1, x]))
+            down = y + 1 < TARGET_H and _openish(int(semantic[y + 1, x]))
+            left = x > 0 and _openish(int(semantic[y, x - 1]))
+            right = x + 1 < TARGET_W and _openish(int(semantic[y, x + 1]))
+
+            if up and left:
+                key = "corner_ul"
+            elif up and right:
+                key = "corner_ur"
+            elif down and right:
+                key = "corner_lr"
+            elif down and left:
+                key = "corner_ll"
+            elif left:
+                key = "left_edge"
+            elif right:
+                key = "right_edge"
+            elif up:
+                key = "top_edge"
+            elif down:
+                key = "bottom_edge"
+            else:
+                key = "interior"
+            out[y, x] = _pick(profile[key], seed, x, y)
+
     # Exact native seam and exit constraints remain authoritative.
-    for (x,y),v in fixed_constraints(base_repo,seed).items(): out[y,x]=v
-    native,repairs,_=repair_connectivity(base_repo,out,seed)
-    return native,repairs
+    for (x, y), value in fixed_constraints(base_repo, seed).items():
+        out[y, x] = value
+
+    if not set(int(v) for v in out.reshape(-1)) <= SAFE_ROUTE_BLOCKS | set(
+        fixed_constraints(base_repo, seed).values()
+    ):
+        raise AssertionError("style materializer emitted an unsafe route block")
+
+    native, repairs, _ = repair_connectivity(base_repo, out, seed)
+    return native, repairs
 
 
 def semantic_metrics(grid: np.ndarray, corpus: SemanticCorpus, seed: int, repairs: int, native_repairs: int, elapsed: float):
@@ -374,11 +462,21 @@ def semantic_contact_sheet(images, output):
     sheet.save(output)
 
 
-def run_method(base_repo: Path, corpus: SemanticCorpus, name: str, fn, seeds, output):
+def run_method(
+    base_repo: Path,
+    corpus: SemanticCorpus,
+    name: str,
+    fn,
+    seeds,
+    output,
+    style_profile: str = "woodland_trail",
+):
     rows=[]; images=[]; d=output/name; d.mkdir(parents=True,exist_ok=True)
     for seed in seeds:
         t=time.perf_counter(); raw=fn(seed); repaired,srep=semantic_repair(raw,seed)
-        native,nrep=base_materializer(base_repo,repaired,seed); elapsed=time.perf_counter()-t
+        native,nrep=base_materializer(
+            base_repo, repaired, seed, style_profile=style_profile
+        ); elapsed=time.perf_counter()-t
         png=d/f"seed-{seed}.png"; render_map(base_repo,NativeMap(
             name="Semantic",map_id=load_map(base_repo,"Route1").map_id,width=TARGET_W,height=TARGET_H,
             tileset="OVERWORLD",border_block=load_map(base_repo,"Route1").border_block,
@@ -398,6 +496,11 @@ def main():
     p.add_argument("--output",required=True)
     p.add_argument("--seeds",default="41,42,43,44,45,46,47,48")
     p.add_argument("--checkpoint")
+    p.add_argument(
+        "--style-profile",
+        choices=sorted(STYLE_PROFILES),
+        default="woodland_trail",
+    )
     args=p.parse_args()
     base=Path(args.base)
     sources=[("pokered",base)]
@@ -407,13 +510,27 @@ def main():
     output=Path(args.output); output.mkdir(parents=True,exist_ok=True)
     seeds=[int(v) for v in args.seeds.split(",")]
     results=[]
-    results+=run_method(base,corpus,"semantic-graph",lambda seed: semantic_graph(seed),seeds,output)
-    results+=run_method(base,corpus,"semantic-wfc",lambda seed: semantic_wfc(corpus,seed),seeds,output)
+    results+=run_method(
+        base, corpus, "semantic-graph", lambda seed: semantic_graph(seed),
+        seeds, output, args.style_profile
+    )
+    results+=run_method(
+        base, corpus, "semantic-wfc", lambda seed: semantic_wfc(corpus,seed),
+        seeds, output, args.style_profile
+    )
     if args.checkpoint:
         from semantic_diffusion import load_sampler
         sampler=load_sampler(Path(args.checkpoint),corpus)
-        results+=run_method(base,corpus,"semantic-diffusion",sampler,seeds,output)
-    meta={"windows":len(corpus.windows),"sources":Counter(corpus.sources),"maps":len(set(zip(corpus.sources,corpus.maps)))}
+        results+=run_method(
+            base, corpus, "semantic-diffusion", sampler,
+            seeds, output, args.style_profile
+        )
+    meta={
+        "windows":len(corpus.windows),
+        "sources":Counter(corpus.sources),
+        "maps":len(set(zip(corpus.sources,corpus.maps))),
+        "style_profile":args.style_profile,
+    }
     (output/"corpus.json").write_text(json.dumps(meta,indent=2,default=dict)+"\n")
     (output/"results.json").write_text(json.dumps(results,indent=2)+"\n")
     by=defaultdict(list)
