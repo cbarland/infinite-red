@@ -309,12 +309,7 @@ pub fn expand(state: &mut WorldState, req: ExpansionRequest) -> Result<String, S
         0.08 + ((roll % 9) as f32 / 100.0)
     };
     let organic_target = round2((from.challenge + increase).max(1.0));
-    let policy = progress_policy(
-        state,
-        from.challenge,
-        organic_target,
-        req.rom_usage_ratio,
-    );
+    let policy = progress_policy(state, from.challenge, organic_target, req.rom_usage_ratio);
     let challenge = policy.target_challenge;
 
     let promise_id = if !policy.allow_new_promises {
