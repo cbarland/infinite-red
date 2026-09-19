@@ -1,0 +1,26 @@
+# External decision models are referenced, not vendored.
+
+[jev]
+role = "primary_structured_decision_model"
+provider = "openrouter"
+model = "typesafe/jev-1.13"
+benchmark_alias = "~typesafe/jev-latest"
+api_key_env = "OPENROUTER_API_KEY"
+# The fuzzy-calc reference adapter uses OpenRouter's Decisions API.
+# Keep the endpoint configurable because this surface is experimental.
+decisions_endpoint = "https://openrouter.ai/api/alpha/decisions"
+record_exact_model_in_world_history = true
+
+[needle]
+role = "local_structured_story_planner"
+upstream = "Cactus-Compute/needle3"
+license = "Apache-2.0"
+binary_env = "NEEDLE_BIN"
+weights_env = "NEEDLE_MODEL"
+vendored = false
+telemetry_env = "NEEDLE_TELEMETRY"
+telemetry_value = "0"
+
+[frontier]
+role = "exception_only"
+enabled_by_default = false
