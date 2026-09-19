@@ -370,7 +370,7 @@ def _first_route_path_centers(seed: int, height: int) -> list[int]:
         previous = centers[y + 1]
         payload = f"{seed}:path-step:{y}".encode("ascii")
         roll = hashlib.blake2s(payload, digest_size=1).digest()[0] % 5
-        step = (-1, 0, 0, 0, 1)[roll]
+        step = (-1, -1, 0, 1, 1)[roll]
         centers[y] = max(1, min(7, previous + step))
     return centers
 
@@ -451,10 +451,16 @@ def generate_first_route(repo: Path, seed: int) -> tuple[NativeMap, bytes, dict]
     spur_y = 7 + _stable_index(seed, 3, 7, FIRST_ROUTE_PATH, 4)
     center = centers[spur_y]
     go_right = _stable_index(seed, center, spur_y, FIRST_ROUTE_PATH, 2) == 0
-    if go_right:
-        spur_cells = list(range(center + 2, min(width - 1, center + 5)))
+    room_right = (width - 2) - (center + 1)
+    room_left = center - 1
+    if (go_right and room_right >= 2) or room_left < 2:
+        end = min(width - 1, center + 5)
+        spur_cells = list(range(center + 2, end))
     else:
-        spur_cells = list(range(max(1, center - 3), center))
+        start = max(1, center - 3)
+        spur_cells = list(range(start, center))
+    if len(spur_cells) < 2:
+        raise AssertionError("generated route spur did not have room to materialize")
     for x in spur_cells:
         blocks[spur_y * width + x] = FIRST_ROUTE_PATH
 
