@@ -346,7 +346,9 @@ def hard_carve_native_path(base: Path, blocks: np.ndarray, sem: np.ndarray, seed
     if tile_connectivity(base, blocks, seed):
         return blocks, 0
 
-    start = (2, BLOCK_H - 1)
+    # Route1 south seam block x=2 is fully walkable; begin one block above it
+    # so the fallback never depends on lateral movement inside the authored seam.
+    start = (2, BLOCK_H - 2)
     target_x = choose_north_exit(seed)
     targets = {(target_x, 0), (target_x + 1, 0)}
     dist = {start: 0.0}
@@ -387,8 +389,6 @@ def hard_carve_native_path(base: Path, blocks: np.ndarray, sem: np.ndarray, seed
     out = blocks.copy()
     changes = 0
     for x, y in path:
-        if y == BLOCK_H - 1:
-            continue
         if int(out[y, x]) != 0x31:
             out[y, x] = 0x31
             changes += 1
