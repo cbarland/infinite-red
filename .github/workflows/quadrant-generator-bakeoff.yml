@@ -1,0 +1,103 @@
+name: quadrant-generator-bakeoff
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/bakeoff/quadrant_*"
+      - "tools/bakeoff/bakeoff.py"
+      - "tools/native/**"
+      - "config/training-corpus.toml"
+      - ".github/workflows/quadrant-generator-bakeoff.yml"
+  pull_request:
+    paths:
+      - "tools/bakeoff/quadrant_*"
+      - "tools/bakeoff/bakeoff.py"
+      - "tools/native/**"
+      - "config/training-corpus.toml"
+      - ".github/workflows/quadrant-generator-bakeoff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quadrant-bakeoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Infinite Red
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned training corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib, subprocess, tomllib
+          root = pathlib.Path(r"${{ runner.temp }}") / "corpus"
+          root.mkdir(parents=True, exist_ok=True)
+          with open("config/training-corpus.toml", "rb") as f:
+              cfg = tomllib.load(f)
+          for src in cfg["source"]:
+              dest = root / src["name"]
+              subprocess.run(
+                  ["git", "clone", "--filter=blob:none", "--no-checkout", src["repository"], str(dest)],
+                  check=True,
+              )
+              subprocess.run(
+                  ["git", "-C", str(dest), "fetch", "--depth", "1", "origin", src["commit"]],
+                  check=True,
+              )
+              subprocess.run(
+                  ["git", "-C", str(dest), "checkout", "--detach", src["commit"]],
+                  check=True,
+              )
+              actual = subprocess.check_output(
+                  ["git", "-C", str(dest), "rev-parse", "HEAD"], text=True
+              ).strip()
+              assert actual == src["commit"], (src["name"], actual, src["commit"])
+          PY
+
+      - name: Install lightweight dependencies
+        run: python -m pip install -r tools/bakeoff/requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m py_compile             tools/native/pokered_native.py             tools/bakeoff/bakeoff.py             tools/bakeoff/quadrant_bakeoff.py             tools/bakeoff/quadrant_diffusion.py
+
+      - name: Run half-block graph and WFC baselines
+        env:
+          PYTHONPATH: tools/native:tools/bakeoff
+        run: |
+          python tools/bakeoff/quadrant_bakeoff.py             --base "$RUNNER_TEMP/corpus/pokered"             --source star_beasts_comet="$RUNNER_TEMP/corpus/star_beasts_comet"             --source pokemon_yume="$RUNNER_TEMP/corpus/pokemon_yume"             --source pokemon_amaranth="$RUNNER_TEMP/corpus/pokemon_amaranth"             --output "$RUNNER_TEMP/quadrant-baseline"             --seeds 41,42,43,44             --style-profile woodland_trail
+
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Train half-block denoiser
+        env:
+          PYTHONPATH: tools/native:tools/bakeoff
+        run: |
+          python tools/bakeoff/quadrant_diffusion.py             --base "$RUNNER_TEMP/corpus/pokered"             --source star_beasts_comet="$RUNNER_TEMP/corpus/star_beasts_comet"             --source pokemon_yume="$RUNNER_TEMP/corpus/pokemon_yume"             --source pokemon_amaranth="$RUNNER_TEMP/corpus/pokemon_amaranth"             --output "$RUNNER_TEMP/quadrant-route.pt"             --steps 2200
+
+      - name: Run full half-block bake-off
+        env:
+          PYTHONPATH: tools/native:tools/bakeoff
+        run: |
+          python tools/bakeoff/quadrant_bakeoff.py             --base "$RUNNER_TEMP/corpus/pokered"             --source star_beasts_comet="$RUNNER_TEMP/corpus/star_beasts_comet"             --source pokemon_yume="$RUNNER_TEMP/corpus/pokemon_yume"             --source pokemon_amaranth="$RUNNER_TEMP/corpus/pokemon_amaranth"             --output "$RUNNER_TEMP/quadrant-bakeoff"             --seeds 41,42,43,44,45,46,47,48             --checkpoint "$RUNNER_TEMP/quadrant-route.pt"             --style-profile woodland_trail
+          cat "$RUNNER_TEMP/quadrant-bakeoff/report.md"
+          cat "$RUNNER_TEMP/quadrant-route.json"
+
+      - name: Record research metadata
+        run: |
+          cp "$RUNNER_TEMP/quadrant-route.json" "$RUNNER_TEMP/quadrant-bakeoff/quadrant-route.json"
+          cp "$RUNNER_TEMP/quadrant-route.pt" "$RUNNER_TEMP/quadrant-bakeoff/quadrant-route.pt"
+          cp config/training-corpus.toml "$RUNNER_TEMP/quadrant-bakeoff/training-corpus.toml"
+
+      - name: Upload half-block bake-off artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quadrant-route-generator-bakeoff
+          path: ${{ runner.temp }}/quadrant-bakeoff/
+          if-no-files-found: error
