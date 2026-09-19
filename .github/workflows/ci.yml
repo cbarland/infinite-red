@@ -30,7 +30,12 @@ jobs:
         run: cargo build --release -p infinite-red-worldgen
 
       - name: Check director adapters
-        run: python -m py_compile tools/director/jev.py tools/director/needle_story.py
+        run: |
+          python -m py_compile \
+            tools/director/jev.py \
+            tools/director/needle_story.py \
+            tools/bakeoff/jev_critic.py \
+            tools/bakeoff/select_jev_finetune.py
 
       - name: Smoke test first vertical
         shell: bash
