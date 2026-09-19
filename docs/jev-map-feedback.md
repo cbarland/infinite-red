@@ -42,3 +42,17 @@ The topology model can therefore learn from multiple Gen 1 hacks even when their
 5. Fine-tune with roughly 75% authored / 25% synthetic examples.
 6. Re-evaluate against held-out authored maps and visual contact sheets.
 7. Only increase synthetic weight if quality improves without diversity collapse.
+
+## Distilling Jev for offline generation
+
+Jev labels can also train a tiny local critic over semantic maps. This is separate from the topology generator.
+
+A useful progression is:
+
+1. Jev labels route quality, exploration interest, naturalness, visual rhythm and failure modes.
+2. Human spot-checks a small stratified sample.
+3. Train a lightweight convolutional critic to predict Jev/human scores from the semantic grid and world context.
+4. On-device generation can sample many tiny-diffusion candidates and use the local critic for fast reranking.
+5. When network access is available, Jev can periodically arbitrate ambiguous cases and add fresh labels.
+
+This reduces runtime network dependence without discarding Jev's structured judgment capability.
