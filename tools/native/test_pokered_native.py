@@ -91,6 +91,20 @@ class NativePalletTests(unittest.TestCase):
             slot.block_bytes[: (height - 1) * width],
         )
 
+    def test_first_route_has_real_macro_structure(self) -> None:
+        _, generated, manifest = generate_first_route(self.repo, 42)
+        self.assertEqual(manifest["generator"], "half_block_graph_v1")
+        self.assertEqual(manifest["style_profile"], "woodland_trail")
+        self.assertGreaterEqual(len(manifest["branches"]), 2)
+        self.assertGreaterEqual(len(manifest["clearings"]), 2)
+        self.assertGreaterEqual(
+            len({node[0] for node in manifest["main_nodes"]}),
+            4,
+        )
+        self.assertLessEqual(manifest["source_same_cells"], 40)
+        self.assertEqual(manifest["hard_connectivity_repairs"], 0)
+        self.assertEqual(len(generated), 180)
+
     def test_location_names_are_generated_and_deterministic(self) -> None:
         first = generate_location_names(42)
         second = generate_location_names(42)
