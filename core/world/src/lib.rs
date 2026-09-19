@@ -1,6 +1,30 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub const MAX_CHALLENGE: f32 = 10.0;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClosureMode {
+    Expanding,
+    Converging,
+    Endgame,
+    Finalize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProgressPolicy {
+    pub rom_usage_ratio: f32,
+    pub closure_pressure: f32,
+    pub challenge_floor: f32,
+    pub target_challenge: f32,
+    pub resolution_quota: usize,
+    pub allow_new_promises: bool,
+    pub max_forward_frontiers: u8,
+    pub finale_required: bool,
+    pub mode: ClosureMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldState {
     pub version: u32,
@@ -78,6 +102,58 @@ pub struct Promise {
 pub struct ExpansionRequest {
     pub from_area: String,
     pub exit_id: String,
+    pub rom_usage_ratio: f32,
+}
+
+pub fn progress_policy(
+    state: &WorldState,
+    predecessor_challenge: f32,
+    organic_target: f32,
+    rom_usage_ratio: f32,
+) -> ProgressPolicy {
+    let usage = rom_usage_ratio.clamp(0.0, 1.0);
+    let closure_pressure = smoothstep(0.70, 0.98, usage);
+    let rom_progress = smoothstep(0.45, 0.995, usage);
+    let badge_progress = (state.badges as f32 / 8.0).clamp(0.0, 1.0);
+    let challenge_progress =
+        ((predecessor_challenge - 1.0) / (MAX_CHALLENGE - 1.0)).clamp(0.0, 1.0);
+    let progress = challenge_progress
+        .max(badge_progress * 0.92)
+        .max(rom_progress);
+
+    let challenge_floor = round2(1.0 + (MAX_CHALLENGE - 1.0) * progress);
+    let target_challenge = round2(organic_target.max(challenge_floor).min(MAX_CHALLENGE));
+
+    let unresolved = state.promises.values().filter(|p| !p.resolved).count();
+    let resolution_quota = if closure_pressure < 0.25 || unresolved == 0 {
+        0
+    } else {
+        ((unresolved as f32) * closure_pressure)
+            .ceil()
+            .min(unresolved as f32) as usize
+    };
+
+    let mode = if usage >= 0.97 {
+        ClosureMode::Finalize
+    } else if usage >= 0.88 {
+        ClosureMode::Endgame
+    } else if usage >= 0.70 {
+        ClosureMode::Converging
+    } else {
+        ClosureMode::Expanding
+    };
+
+    ProgressPolicy {
+        rom_usage_ratio: usage,
+        closure_pressure,
+        challenge_floor,
+        target_challenge,
+        resolution_quota,
+        allow_new_promises: usage < 0.84,
+        max_forward_frontiers: if usage >= 0.85 { 1 } else { 2 },
+        finale_required: usage >= 0.97,
+        mode,
+    }
 }
 
 pub fn bootstrap(seed: u64) -> WorldState {
@@ -232,9 +308,18 @@ pub fn expand(state: &mut WorldState, req: ExpansionRequest) -> Result<String, S
     } else {
         0.08 + ((roll % 9) as f32 / 100.0)
     };
-    let challenge = round2((from.challenge + increase).max(1.0));
+    let organic_target = round2((from.challenge + increase).max(1.0));
+    let policy = progress_policy(
+        state,
+        from.challenge,
+        organic_target,
+        req.rom_usage_ratio,
+    );
+    let challenge = policy.target_challenge;
 
-    let promise_id = if from.id == "oaks_lab" {
+    let promise_id = if !policy.allow_new_promises {
+        None
+    } else if from.id == "oaks_lab" {
         Some("STORY:ROAD_CLEARED".to_string())
     } else if roll % 3 == 0 {
         Some(format!("STORY:BLOCKAGE_{:04}", state.areas.len()))
@@ -294,7 +379,12 @@ pub fn expand(state: &mut WorldState, req: ExpansionRequest) -> Result<String, S
             format!("Generated from {}", from.name),
             format!("badge_count={}", state.badges),
             format!("player_level_hint={}", state.player_level_hint),
-            "Challenge derives primarily from predecessor area.".into(),
+            format!("rom_usage_ratio={:.3}", policy.rom_usage_ratio),
+            format!("closure_mode={:?}", policy.mode),
+            format!("closure_pressure={:.3}", policy.closure_pressure),
+            format!("promise_resolution_quota={}", policy.resolution_quota),
+            "Challenge derives from predecessor progress with ROM pressure as a convergence floor."
+                .into(),
         ],
     };
 
@@ -371,7 +461,7 @@ pub fn validate(state: &WorldState) -> Result<(), String> {
         if !ids.insert(id) {
             return Err(format!("duplicate area id {id}"));
         }
-        if area.challenge < 1.0 {
+        if !(1.0..=MAX_CHALLENGE).contains(&area.challenge) {
             return Err(format!("area {id} has invalid challenge"));
         }
         for exit in &area.exits {
@@ -435,6 +525,7 @@ mod tests {
             ExpansionRequest {
                 from_area: "oaks_lab".into(),
                 exit_id: "south_door".into(),
+                rom_usage_ratio: 0.0,
             },
         )
         .unwrap();
@@ -459,9 +550,53 @@ mod tests {
             ExpansionRequest {
                 from_area: "oaks_lab".into(),
                 exit_id: "south_door".into(),
+                rom_usage_ratio: 0.0,
             },
         )
         .unwrap_err();
         assert!(err.contains("gate is closed"));
     }
+
+    #[test]
+    fn rom_pressure_forces_convergence_and_finale() {
+        let mut w = bootstrap(42);
+        choose_starter(&mut w, "charmander").unwrap();
+        defeat_rival(&mut w).unwrap();
+        expand(
+            &mut w,
+            ExpansionRequest {
+                from_area: "oaks_lab".into(),
+                exit_id: "south_door".into(),
+                rom_usage_ratio: 0.0,
+            },
+        )
+        .unwrap();
+
+        let policy = progress_policy(&w, 1.17, 1.30, 0.99);
+        assert_eq!(policy.mode, ClosureMode::Finalize);
+        assert_eq!(policy.target_challenge, MAX_CHALLENGE);
+        assert_eq!(policy.resolution_quota, 1);
+        assert!(!policy.allow_new_promises);
+        assert_eq!(policy.max_forward_frontiers, 1);
+        assert!(policy.finale_required);
+    }
+
+    #[test]
+    fn low_rom_pressure_keeps_world_open() {
+        let w = bootstrap(42);
+        let policy = progress_policy(&w, 1.0, 1.1, 0.20);
+        assert_eq!(policy.mode, ClosureMode::Expanding);
+        assert_eq!(policy.resolution_quota, 0);
+        assert!(policy.allow_new_promises);
+        assert_eq!(policy.max_forward_frontiers, 2);
+        assert!(!policy.finale_required);
+    }
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge0 >= edge1 {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
