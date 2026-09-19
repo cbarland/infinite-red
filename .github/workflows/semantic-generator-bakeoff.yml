@@ -8,13 +8,6 @@ on:
       - "tools/bakeoff/bakeoff.py"
       - "config/training-corpus.toml"
       - ".github/workflows/semantic-generator-bakeoff.yml"
-  pull_request:
-    paths:
-      - "tools/bakeoff/semantic_*"
-      - "tools/bakeoff/bakeoff.py"
-      - "config/training-corpus.toml"
-      - ".github/workflows/semantic-generator-bakeoff.yml"
-
 permissions:
   contents: read
 
